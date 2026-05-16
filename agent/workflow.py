@@ -201,13 +201,30 @@ def build_workflow(
         }
 
     async def plan_repo(state: WorkflowState) -> dict[str, Any]:
+        idea = state["idea"]
+        mvp_scope = state.get("mvp_scope", {})
+        
+        # Check retrieved docs for tech stack requirements
+        tech_stack_docs = [
+            doc for doc in state.get("retrieved_docs", [])
+            if "stack" in doc.get("chunk_text", "").lower() or "tech" in doc.get("chunk_text", "").lower()
+        ]
+        
+        prompt = build_plan_repo_prompt(
+            idea=idea,
+            mvp_scope=mvp_scope,
+        )
+        
+        if tech_stack_docs:
+            stack_info = "\n".join([doc.get("chunk_text", "") for doc in tech_stack_docs])
+            prompt += f"\n\nMake sure to incorporate the following required tech stack from the hackathon rules:\n{stack_info}"
+        else:
+            prompt += "\n\nNo required tech stack was found in the rules. Defaulting to Python, FastAPI, React, and Supabase."
+            
         result = await active_model_client.complete_structured(
             purpose="plan_repo",
             model=settings.nemotron_model,
-            prompt=build_plan_repo_prompt(
-                idea=state["idea"],
-                mvp_scope=state.get("mvp_scope", {}),
-            ),
+            prompt=prompt,
             response_model=RepoPlanOutput,
             max_tokens=900,
             reasoning_effort="medium",
