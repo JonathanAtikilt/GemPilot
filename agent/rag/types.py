@@ -5,10 +5,29 @@ from pydantic import BaseModel, Field
 DocType = Literal[
     "hackathon_rules",
     "nvidia_docs",
+    "nvidia_model_docs",
     "team_notes",
     "build_log",
     "generated_project_doc",
+    "required_deliverables",
+    "allowed_tools_apis",
+    "repository_format",
+    "demo_format",
+    "tech_stack",
+    "scope_warning",
+    "agent_architecture",
+    "implementation_constraints",
     "unknown",
+]
+
+Priority = Literal["critical", "high", "medium", "low"]
+
+BuildContextResponseCategory = Literal[
+    "requiredDeliverables",
+    "allowedToolsAndAPIs",
+    "requiredRepositoryFormat",
+    "requiredDemoFormat",
+    "requiredTechStackPieces",
 ]
 
 
@@ -27,6 +46,7 @@ class RagChunk(BaseModel):
     source: str
     title: str
     doc_type: DocType
+    authority_score: float = Field(ge=0, le=1)
     text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     embedding: list[float] | None = None
@@ -34,12 +54,14 @@ class RagChunk(BaseModel):
 
 class RagSearchResult(RagChunk):
     score: float
+    similarity: float | None = None
     rerank_score: float | None = None
 
 
 class RagSourceSummary(BaseModel):
     source: str
     doc_type: DocType
+    authority_score: float = Field(ge=0, le=1)
     chunk_count: int
 
 
@@ -60,8 +82,10 @@ class ApiChunk(BaseModel):
     source: str
     title: str
     doc_type: DocType
+    authority_score: float
     text: str
     score: float
+    similarity: float | None = None
 
     @classmethod
     def from_search_result(cls, chunk: RagSearchResult) -> "ApiChunk":
@@ -69,8 +93,10 @@ class ApiChunk(BaseModel):
             source=chunk.source,
             title=chunk.title,
             doc_type=chunk.doc_type,
+            authority_score=chunk.authority_score,
             text=chunk.text,
             score=chunk.score,
+            similarity=chunk.similarity,
         )
 
 
@@ -96,3 +122,48 @@ class AnswerContextResponse(BaseModel):
 
 class SourcesResponse(BaseModel):
     sources: list[RagSourceSummary]
+
+
+class BuildContextOptionalParams(BaseModel):
+    stack: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
+    repoPreference: str | None = None
+    demoPreference: str | None = None
+
+
+class BuildContextRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    idea: str = Field(min_length=1)
+    optionalParams: BuildContextOptionalParams | None = None
+    topK: int = Field(default=8, ge=1, le=25)
+
+
+class BuildContextItem(BaseModel):
+    item: str
+    priority: Priority
+    reason: str
+    source: str
+
+
+class ScopeWarningItem(BaseModel):
+    item: str
+    reason: str
+    source: str
+
+
+class EvidenceItem(BaseModel):
+    source: str
+    docType: DocType
+    chunkId: str
+    content: str
+    score: float
+
+
+class BuildContextResponse(BaseModel):
+    requiredDeliverables: list[BuildContextItem]
+    allowedToolsAndAPIs: list[BuildContextItem]
+    requiredRepositoryFormat: list[BuildContextItem]
+    requiredDemoFormat: list[BuildContextItem]
+    requiredTechStackPieces: list[BuildContextItem]
+    scopeWarnings: list[ScopeWarningItem]
+    evidence: list[EvidenceItem]

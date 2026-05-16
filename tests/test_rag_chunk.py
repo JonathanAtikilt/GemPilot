@@ -3,6 +3,8 @@ from agent.rag.types import SourceDocument
 
 
 def test_detect_doc_type_from_known_sources() -> None:
+    assert detect_doc_type("https://www.shortesthack.com/?tab=rules") == "hackathon_rules"
+    assert detect_doc_type("https://docs.nvidia.com/nim/") == "nvidia_docs"
     assert detect_doc_type("rag/sources/hackathon_rules.md") == "hackathon_rules"
     assert detect_doc_type("rag/sources/nvidia_models.md") == "nvidia_docs"
     assert detect_doc_type("rag/sources/team_notes.md") == "team_notes"
@@ -26,6 +28,7 @@ def test_chunk_document_preserves_heading_and_metadata() -> None:
     assert len(chunks) == 1
     assert chunks[0].title == "Team Notes"
     assert chunks[0].doc_type == "team_notes"
+    assert chunks[0].authority_score == 0.5
     assert chunks[0].text.startswith("# Team Notes")
     assert chunks[0].metadata["chunk_index"] == 0
 

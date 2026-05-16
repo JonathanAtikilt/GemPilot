@@ -2,6 +2,7 @@ from typing import Any
 
 from supabase import Client, create_client
 
+from agent.rag.authority import authority_score_for_doc_type
 from agent.rag.config import get_supabase_service_role_key, get_supabase_url
 from agent.rag.errors import RagConfigurationError
 from agent.rag.types import DocType, RagChunk, RagSearchResult, RagSourceSummary
@@ -35,6 +36,7 @@ class SupabaseRagStore:
                 "source": chunk.source,
                 "title": chunk.title,
                 "doc_type": chunk.doc_type,
+                "authority_score": chunk.authority_score,
                 "text": chunk.text,
                 "metadata": chunk.metadata,
                 "embedding": chunk.embedding,
@@ -68,15 +70,20 @@ class SupabaseRagStore:
                 source=str(row["source"]),
                 title=str(row.get("title") or ""),
                 doc_type=row.get("doc_type") or "unknown",
+                authority_score=float(
+                    row.get("authority_score")
+                    or authority_score_for_doc_type(row.get("doc_type") or "unknown")
+                ),
                 text=str(row["text"]),
                 metadata=row.get("metadata") or {},
-                score=float(row.get("similarity") or 0),
+                similarity=float(row.get("similarity") or 0),
+                score=float(row.get("weighted_score") or row.get("similarity") or 0),
             )
             for row in response.data or []
         ]
 
     async def list_sources(self) -> list[RagSourceSummary]:
-        response = self.client.table("rag_chunks").select("source, doc_type").execute()
+        response = self.client.table("rag_chunks").select("source, doc_type, authority_score").execute()
         self._raise_for_supabase_error(response, "list RAG sources")
         return _summarize_sources(response.data or [])
 
@@ -102,6 +109,10 @@ def _summarize_sources(rows: list[dict[str, Any]]) -> list[RagSourceSummary]:
             counts[source] = RagSourceSummary(
                 source=source,
                 doc_type=row.get("doc_type") or "unknown",
+                authority_score=float(
+                    row.get("authority_score")
+                    or authority_score_for_doc_type(row.get("doc_type") or "unknown")
+                ),
                 chunk_count=1,
             )
 

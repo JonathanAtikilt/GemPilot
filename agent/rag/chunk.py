@@ -2,14 +2,36 @@ import hashlib
 import re
 from pathlib import Path
 
+from agent.rag.authority import authority_score_for_doc_type
 from agent.rag.types import DocType, RagChunk, SourceDocument
 
 TARGET_CHARS = 2800
 OVERLAP_CHARS = 600
 
+SECTION_DOC_TYPE_MAP: dict[str, DocType] = {
+    "required deliverables": "required_deliverables",
+    "allowed tools and apis": "allowed_tools_apis",
+    "required repository format": "repository_format",
+    "required demo format": "demo_format",
+    "required tech stack pieces": "tech_stack",
+    "scope warnings": "scope_warning",
+}
+
+
+def detect_doc_type_from_section_heading(heading: str) -> DocType | None:
+    normalized = re.sub(r"^#{1,6}\s*", "", heading).strip().lower()
+    return SECTION_DOC_TYPE_MAP.get(normalized)
+
 
 def detect_doc_type(source: str) -> DocType:
     name = source.lower()
+
+    if name.startswith("http://") or name.startswith("https://"):
+        if "shortesthack" in name or "hackathon" in name:
+            return "hackathon_rules"
+        if "nvidia.com" in name or "integrate.api.nvidia" in name:
+            return "nvidia_docs"
+        return "generated_project_doc"
 
     if "hackathon" in name or "rules" in name:
         return "hackathon_rules"
@@ -21,6 +43,10 @@ def detect_doc_type(source: str) -> DocType:
         return "build_log"
     if "readme" in name or "docs" in name:
         return "generated_project_doc"
+    if "build_requirements" in name or "architecture" in name:
+        return "implementation_constraints"
+    if "agent" in name:
+        return "agent_architecture"
 
     return "unknown"
 
@@ -31,15 +57,20 @@ def extract_title(text: str, source: str) -> str:
 
 
 def chunk_document(document: SourceDocument) -> list[RagChunk]:
-    raw_chunks: list[str] = []
+    section_chunks: list[tuple[str, str, DocType | None]] = []
     for heading, body in _split_by_markdown_headings(document.text):
-        raw_chunks.extend(_split_section(heading, body))
+        section_doc_type = detect_doc_type_from_section_heading(heading)
+        for text in _split_section(heading, body):
+            section_chunks.append((heading, text, section_doc_type))
 
     chunks: list[RagChunk] = []
-    for index, text in enumerate(raw_chunks):
+    for index, (heading, text, section_doc_type) in enumerate(section_chunks):
         normalized_text = text.strip()
         if not normalized_text:
             continue
+
+        chunk_doc_type = section_doc_type or document.doc_type
+        section_heading = _normalize_section_heading(heading)
 
         digest = hashlib.sha256(
             f"{document.source}:{index}:{normalized_text}".encode("utf-8")
@@ -51,10 +82,14 @@ def chunk_document(document: SourceDocument) -> list[RagChunk]:
                 chunk_id=f"{source_slug}-{index}-{digest}",
                 source=document.source,
                 title=document.title,
-                doc_type=document.doc_type,
+                doc_type=chunk_doc_type,
+                authority_score=authority_score_for_doc_type(chunk_doc_type),
                 text=normalized_text,
                 metadata={
                     **document.metadata,
+                    "source_path": document.source,
+                    "section_heading": section_heading,
+                    "doc_type": chunk_doc_type,
                     "chunk_index": index,
                     "created_at": document.created_at,
                     "updated_at": document.updated_at,
@@ -63,6 +98,12 @@ def chunk_document(document: SourceDocument) -> list[RagChunk]:
         )
 
     return chunks
+
+
+def _normalize_section_heading(heading: str) -> str | None:
+    if not heading:
+        return None
+    return re.sub(r"^#{1,6}\s*", "", heading).strip() or None
 
 
 def _split_by_markdown_headings(text: str) -> list[tuple[str, str]]:

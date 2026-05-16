@@ -43,6 +43,11 @@ The ingester reads `.md` and `.txt` files from:
 - `rag/sources/`
 - `logs/`
 
+It also scrapes configured web pages (seed URL plus **first-level, same-domain links only**):
+
+- `RAG_SCRAPE_URLS` in `.env` (comma-separated), and/or
+- `rag/scrape_urls.txt` (one URL per line)
+
 It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dimensions, and stores them in Supabase.
 
 ## Search
@@ -59,8 +64,21 @@ curl -X POST http://localhost:3001/rag/search \
 
 Search embeds the query in query mode, retrieves similar chunks, and reranks candidates with `llama-nemotron-rerank-1b-v2` when available.
 
+## Orchestrator helper
+
+```python
+from agent.rag import get_build_context
+
+context = await get_build_context(
+    project_id="demo-project",
+    idea="Autonomous hackathon teammate",
+    optional_params={"stack": ["FastAPI", "Supabase"], "features": ["RAG", "GitHub"]},
+)
+```
+
 ## Agent Endpoints
 
+- `POST /rag/get-build-context`: Orchestrator calls this before planning. Returns structured deliverables, tools, repo/demo format, tech stack, scope warnings, and evidence.
 - `POST /rag/answer-context`: Orchestrator calls this before scope or next-action decisions. It returns context and a short evidence summary, not a final decision.
 - `POST /rag/reindex-logs`: GitHub/build-log agent calls this after new commits, build output, or errors.
 - `GET /rag/sources`: Frontend calls this to show indexed sources and chunk counts.
@@ -68,6 +86,8 @@ Search embeds the query in query mode, retrieves similar chunks, and reranks can
 
 ## Supabase
 
-Apply the migration in `supabase/migrations/` to create `rag_chunks` and `match_rag_chunks`.
+Apply the migrations in `supabase/migrations/` to create `rag_chunks` and `match_rag_chunks`.
+
+Each chunk stores an `authority_score` (0–1) by source type: hackathon rules (1.0) > NVIDIA docs (0.95) > project/architecture docs (0.85) > build logs (0.75) > team notes (0.5). Search ranks by vector similarity multiplied by authority, and reranking applies the same boost.
 
 The table has RLS enabled and no anonymous write policy. For backend inserts, set `SUPABASE_SERVICE_ROLE_KEY` in the server environment only.
