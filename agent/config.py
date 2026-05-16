@@ -69,12 +69,42 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="OPENCLAW_API_KEY",
     )
+    openclaw_env: str | None = Field(
+        default=None,
+        validation_alias="OPENCLAW_ENV",
+    )
+    openclaw_base_url: str | None = Field(
+        default=None,
+        validation_alias="OPENCLAW_BASE_URL",
+    )
+    supabase_url: str | None = Field(
+        default=None,
+        validation_alias="SUPABASE_URL",
+    )
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="SUPABASE_SERVICE_ROLE_KEY",
+    )
+    supabase_anon_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="SUPABASE_ANON_KEY",
+    )
+    rag_scrape_urls: str = Field(
+        default="",
+        validation_alias="RAG_SCRAPE_URLS",
+    )
     cors_origins: list[str] = Field(
         default_factory=lambda: list(DEFAULT_CORS_ORIGINS),
         validation_alias="CORS_ORIGINS",
     )
 
-    @field_validator("nvidia_api_key", "openclaw_api_key", mode="before")
+    @field_validator(
+        "nvidia_api_key",
+        "openclaw_api_key",
+        "supabase_service_role_key",
+        "supabase_anon_key",
+        mode="before",
+    )
     @classmethod
     def empty_secret_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -108,6 +138,16 @@ class Settings(BaseSettings):
     @property
     def openclaw_configured(self) -> bool:
         return self._secret_has_value(self.openclaw_api_key)
+
+    @property
+    def supabase_configured(self) -> bool:
+        return bool((self.supabase_url or "").strip()) and self._secret_has_value(
+            self.supabase_service_role_key
+        )
+
+    @property
+    def rag_live_ready(self) -> bool:
+        return self.nvidia_configured and self.supabase_configured
 
     @staticmethod
     def _secret_has_value(secret: SecretStr | None) -> bool:

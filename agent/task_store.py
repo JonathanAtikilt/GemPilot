@@ -53,6 +53,7 @@ class InMemoryTaskStore:
             source=request.source,
             primary_rules_url=request.primary_rules_url,
             additional_urls=list(request.additional_urls),
+            source_urls=list(request.source_urls),
             additional_files=additional_files,
             github_connected=request.github_connected,
             github_connection_id=request.github_connection_id,

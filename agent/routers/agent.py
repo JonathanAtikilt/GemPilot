@@ -120,6 +120,7 @@ async def _read_form_payload(request: Request) -> dict[str, Any]:
         "demo_mode": form.get("demo_mode") or False,
         "title": form.get("title"),
         "primary_rules_url": form.get("primary_rules_url") or form.get("rules_url"),
+        "rules_url": form.get("rules_url"),
         "additional_urls": _form_text_list(form, "additional_urls"),
         "additional_files": additional_files,
         "uploaded_file_contents": uploaded_file_contents,

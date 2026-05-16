@@ -10,19 +10,30 @@ python -m pip install -r requirements.txt
 
 ## Environment
 
-Create `.env` from `.env.example` and set backend secrets only on the server:
+Create `.env` from `.env.example` (or `.env.openclaw.example` on an OpenClaw/Brev backend).
 
-```bash
-NVIDIA_API_KEY=
-NVIDIA_EMBED_MODEL=llama-nemotron-embed-1b-v2
-NVIDIA_RERANK_MODEL=llama-nemotron-rerank-1b-v2
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-```
+**Required for live RAG** (ingest, search, orchestrator `retrieve_context`):
 
-`SUPABASE_SERVICE_ROLE_KEY` is only for backend-side ingestion/search with the private `rag_chunks` table. Do not expose it through frontend variables.
+| Variable | Purpose |
+|----------|---------|
+| `NVIDIA_API_KEY` | Embeddings + reranking |
+| `SUPABASE_URL` | pgvector project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend writes to `rag_chunks` / `memories` |
 
-Supabase is required for RAG storage. If `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing, RAG source listing, ingestion, and search return a configuration error.
+**Optional:**
+
+| Variable | Purpose |
+|----------|---------|
+| `NVIDIA_EMBED_MODEL` | Default `llama-nemotron-embed-1b-v2` |
+| `NVIDIA_RERANK_MODEL` | Default `llama-nemotron-rerank-1b-v2` |
+| `RAG_SCRAPE_URLS` | Comma-separated seed URLs at ingest |
+| `NVIDIA_EMBEDDING_URL` / `NVIDIA_RERANK_URL` | Override NIM endpoints |
+
+**OpenClaw deployment:** set the same RAG variables on the OpenClaw host together with `OPENCLAW_API_KEY` and `OPENCLAW_ENV`. Check readiness with `GET /health` — `rag_configured` should be `true` before demoing ingest.
+
+`SUPABASE_SERVICE_ROLE_KEY` is backend-only. Do not expose it through frontend variables.
+
+If required vars are missing, RAG routes and live memory writes return a configuration error.
 
 ## Run
 
@@ -43,10 +54,10 @@ The ingester reads `.md` and `.txt` files from:
 - `rag/sources/`
 - `logs/`
 
-It also scrapes configured web pages (seed URL plus **first-level, same-domain links only**):
+It also scrapes web pages (seed URL plus **first-level, same-domain links only**) from:
 
-- `RAG_SCRAPE_URLS` in `.env` (comma-separated), and/or
-- `rag/scrape_urls.txt` (one URL per line)
+- **Orchestrator intake** — `primary_rules_url` / `additional_urls` on `POST /agent/run` are scraped in `retrieve_context` before search (preferred for per-task rules).
+- **Static config** — `RAG_SCRAPE_URLS` in `.env` and/or `rag/scrape_urls.txt` (used by `POST /rag/ingest`).
 
 It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dimensions, and stores them in Supabase.
 
