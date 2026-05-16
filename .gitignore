@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.openclaw.example
 
 node_modules/
 .venv/
