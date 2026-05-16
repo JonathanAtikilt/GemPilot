@@ -140,4 +140,13 @@ def mock_live_rag_search(monkeypatch):
 
     monkeypatch.setattr("agent.live_adapters.search_rag", fake_search)
     monkeypatch.setattr("agent.rag.build_context.search_rag", fake_search)
+    
+    from unittest.mock import AsyncMock, MagicMock
+    mock_store = MagicMock()
+    mock_store.search_memories = AsyncMock(return_value=[{"id": "mock_memory"}])
+    mock_store.write_memory = AsyncMock()
+    
+    monkeypatch.setattr("agent.rag.store.get_rag_store", lambda: mock_store)
+    monkeypatch.setattr("agent.rag.embed.embed_text", AsyncMock(return_value=[0.1, 0.2]))
+
     return fake_search

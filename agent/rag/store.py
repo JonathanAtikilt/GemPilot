@@ -87,6 +87,21 @@ class SupabaseRagStore:
         self._raise_for_supabase_error(response, "list RAG sources")
         return _summarize_sources(response.data or [])
 
+    async def write_memory(self, memory: dict[str, Any]) -> None:
+        insert_response = self.client.table("memories").insert([memory]).execute()
+        self._raise_for_supabase_error(insert_response, "insert memory")
+
+    async def search_memories(self, query_embedding: list[float], top_k: int) -> list[dict[str, Any]]:
+        response = self.client.rpc(
+            "match_memories",
+            {
+                "query_embedding": query_embedding,
+                "match_count": top_k,
+            },
+        ).execute()
+        self._raise_for_supabase_error(response, "search memories")
+        return response.data or []
+
     @staticmethod
     def _raise_for_supabase_error(response: Any, action: str) -> None:
         error = getattr(response, "error", None)
