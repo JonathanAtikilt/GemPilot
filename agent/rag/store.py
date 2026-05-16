@@ -1,11 +1,14 @@
-from typing import Any
+from __future__ import annotations
 
-from supabase import Client, create_client
+from typing import TYPE_CHECKING, Any
 
 from agent.rag.authority import authority_score_for_doc_type
 from agent.rag.config import get_supabase_service_role_key, get_supabase_url
 from agent.rag.errors import RagConfigurationError
 from agent.rag.types import DocType, RagChunk, RagSearchResult, RagSourceSummary
+
+if TYPE_CHECKING:
+    from supabase import Client
 
 
 class SupabaseRagStore:
@@ -19,6 +22,8 @@ class SupabaseRagStore:
             raise RagConfigurationError(
                 "Supabase is required for RAG storage. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the backend environment."
             )
+
+        from supabase import create_client
 
         self.client: Client = create_client(supabase_url, supabase_key)
 
