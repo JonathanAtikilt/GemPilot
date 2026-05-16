@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import operator
 import json
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from typing import Annotated, Any, Awaitable, Callable, Literal, NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -17,8 +18,10 @@ from agent.model_client import (
 from agent.model_outputs import (
     BlockerAnalysisOutput,
     DemoScriptOutput,
+    FilePlanOutput,
     FileManifestOutput,
     FinalReadmeOutput,
+    GeneratedFileOutput,
     MvpScopeOutput,
     PitchOutput,
     RepoPlanOutput,
@@ -26,6 +29,8 @@ from agent.model_outputs import (
 from agent.prompts import (
     build_blocker_analysis_prompt,
     build_demo_script_prompt,
+    build_file_content_prompt,
+    build_file_plan_prompt,
     build_file_manifest_prompt,
     build_final_readme_prompt,
     build_pitch_prompt,
@@ -60,6 +65,7 @@ NODE_FLIGHT_STAGE: dict[str, str] = {
     "plan_repo": "flight_plan",
     "create_repo": "autopilot",
     "generate_files": "autopilot",
+    "debug_generated_files": "autopilot",
     "commit_progress": "autopilot",
     "verify_build": "autopilot",
     "handle_blocker": "autopilot",
@@ -77,6 +83,7 @@ NODE_AGENT: dict[str, str] = {
     "plan_repo": "orchestrator",
     "create_repo": "github",
     "generate_files": "orchestrator",
+    "debug_generated_files": "orchestrator",
     "commit_progress": "github",
     "verify_build": "github",
     "handle_blocker": "orchestrator",
@@ -171,6 +178,7 @@ def build_workflow(
     retrieval: RagMemoryAdapter | None = None,
     tools: ToolAdapter | None = None,
     github_connections: GitHubConnectionService | None = None,
+    progress_callback: Callable[[str, list[AgentStep]], Awaitable[None]] | None = None,
 ):
     active_audit = audit or InMemoryAuditAdapter(model_name=settings.nemotron_fast_model)
     active_model_client = model_client or _build_default_model_client(settings)
@@ -209,7 +217,28 @@ def build_workflow(
         prompt_purpose: str | None = None,
         extra_trace: list[str] | None = None,
     ) -> dict[str, list[AgentStep]]:
-        step = AgentStep(
+        step = build_model_step(
+            state=state,
+            node_name=node_name,
+            message=message,
+            result=result,
+            status=status,
+            prompt_purpose=prompt_purpose,
+            extra_trace=extra_trace,
+        )
+        return {"agent_steps": [step], "graph_trace": [step]}
+
+    def build_model_step(
+        *,
+        state: WorkflowState | None = None,
+        node_name: str,
+        message: str,
+        result: ModelCallResult,
+        status: str = "completed",
+        prompt_purpose: str | None = None,
+        extra_trace: list[str] | None = None,
+    ) -> AgentStep:
+        return AgentStep(
             project_id=state["task_id"] if state else None,
             flight_stage=NODE_FLIGHT_STAGE.get(node_name),
             agent=NODE_AGENT.get(node_name),
@@ -225,7 +254,10 @@ def build_workflow(
             ],
             timestamp=datetime.now(UTC),
         )
-        return {"agent_steps": [step], "graph_trace": [step]}
+
+    async def publish_progress(state: WorkflowState, step: AgentStep) -> None:
+        if progress_callback is not None:
+            await progress_callback(state["task_id"], [step])
 
     def receive_idea(state: WorkflowState) -> dict[str, Any]:
         return append_step(
@@ -457,7 +489,7 @@ def build_workflow(
                 memory_matches=state["memory_matches"],
             ),
             response_model=MvpScopeOutput,
-            max_tokens=900,
+            max_tokens=4000,
             reasoning_effort="medium",
         )
         scope = result.output.model_dump()
@@ -481,7 +513,7 @@ def build_workflow(
                 build_context=state.get("build_context", {}),
             ),
             response_model=RepoPlanOutput,
-            max_tokens=900,
+            max_tokens=8000,
             reasoning_effort="medium",
         )
         plan = result.output.model_dump()
@@ -545,19 +577,112 @@ def build_workflow(
         return update
 
     async def generate_files(state: WorkflowState) -> dict[str, Any]:
-        result = await active_model_client.complete_structured(
-            purpose="file_manifest",
-            model=settings.nemotron_fast_model,
-            prompt=build_file_manifest_prompt(
+        progress_steps: list[AgentStep] = []
+        plan_result = await active_model_client.complete_structured(
+            purpose="file_plan",
+            model=settings.nemotron_model,
+            prompt=build_file_plan_prompt(
                 idea=state["idea"],
                 repo_plan=state.get("repo_plan", {}),
                 build_context=state.get("build_context", {}),
             ),
-            response_model=FileManifestOutput,
-            max_tokens=1200,
-            reasoning_effort="low",
+            response_model=FilePlanOutput,
+            max_tokens=8000,
+            reasoning_effort="medium",
         )
-        manifest = result.output.model_dump()
+        plan_step = build_model_step(
+            state=state,
+            node_name="generate_files",
+            message="Planned generated repo files.",
+            result=plan_result,
+            status="running",
+            prompt_purpose="file_plan",
+            extra_trace=[
+                "Next step: generate each planned file as a separate model call.",
+            ],
+        )
+        progress_steps.append(plan_step)
+        await publish_progress(state, plan_step)
+        plan = plan_result.output.model_dump()
+        planned_artifacts = [
+            {
+                key: value
+                for key, value in artifact.items()
+                if key in {"name", "kind", "summary"}
+            }
+            for artifact in plan["artifacts"][:16]
+        ]
+        async def generate_one_file(artifact: dict[str, Any]) -> ModelCallResult:
+            file_name = str(artifact.get("name") or "unknown file")
+            start_step = AgentStep(
+                project_id=state["task_id"],
+                flight_stage=NODE_FLIGHT_STAGE.get("generate_files"),
+                agent=NODE_AGENT.get("generate_files"),
+                node_name="generate_files",
+                status="running",
+                message=f"Generating {file_name}.",
+                model=settings.nemotron_model,
+                prompt_purpose="file_content",
+                model_mode=None,
+                decision_trace=[
+                    f"Started one-file generation for {file_name}.",
+                    "This progress event is emitted before the model call returns.",
+                ],
+                timestamp=datetime.now(UTC),
+            )
+            progress_steps.append(start_step)
+            await publish_progress(state, start_step)
+            file_result = await active_model_client.complete_structured(
+                purpose="file_content",
+                model=settings.nemotron_model,
+                prompt=build_file_content_prompt(
+                    idea=state["idea"],
+                    repo_plan=state.get("repo_plan", {}),
+                    build_context=state.get("build_context", {}),
+                    artifact=artifact,
+                    file_plan=planned_artifacts,
+                ),
+                response_model=GeneratedFileOutput,
+                max_tokens=10000,
+                reasoning_effort="medium",
+            )
+            file_step = build_model_step(
+                state=state,
+                node_name="generate_files",
+                message=f"Generated {file_result.output.name}.",
+                result=file_result,
+                status="running",
+                prompt_purpose="file_content",
+            )
+            progress_steps.append(file_step)
+            await publish_progress(state, file_step)
+            return file_result
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def generate_one_file_limited(artifact: dict[str, Any]) -> ModelCallResult:
+            async with semaphore:
+                return await generate_one_file(artifact)
+
+        generated_file_results = list(
+            await asyncio.gather(
+                *(generate_one_file_limited(artifact) for artifact in planned_artifacts)
+            )
+        )
+        generated_artifacts = [
+            result.output.model_dump() for result in generated_file_results
+        ]
+        manifest = {
+            "artifacts": generated_artifacts,
+            "mode": _package_mode([plan_result, *generated_file_results]),
+            "decision_trace": [
+                *plan_result.output.decision_trace,
+                *[
+                    f"{result.output.name}: {result.mode}"
+                    for result in generated_file_results
+                ],
+            ],
+        }
         frontend_intake = FrontendIntake.model_validate(
             state.get("frontend_intake") or {"idea": state["idea"]}
         )
@@ -572,24 +697,76 @@ def build_workflow(
         artifacts = [
             {
                 **artifact,
-                "mock_mode": result.mode != "live",
+                "mock_mode": manifest["mode"] != "live",
                 "summary": (
                     artifact["summary"]
-                    if result.mode == "live"
-                    else f"{result.mode.title()} mode: {artifact['summary']}"
+                    if manifest["mode"] == "live"
+                    else f"{manifest['mode'].title()} mode: {artifact['summary']}"
                 ),
             }
             for artifact in manifest["artifacts"]
         ]
-        return {
-            **append_model_step(
-                state=state,
-                node_name="generate_files",
-                message="Generated runnable frontend, backend, database, test, docs, and demo files.",
-                result=result,
+        combined_result = ModelCallResult(
+            output=FileManifestOutput.model_validate(manifest),
+            model=settings.nemotron_model,
+            purpose="file_manifest",
+            mode=manifest["mode"],
+            latency_ms=sum(
+                result.latency_ms for result in [plan_result, *generated_file_results]
             ),
+            fallback_reason=next(
+                (
+                    result.fallback_reason
+                    for result in [plan_result, *generated_file_results]
+                    if result.fallback_reason
+                ),
+                None,
+            ),
+        )
+        final_step = build_model_step(
+            state=state,
+            node_name="generate_files",
+            message="Generated runnable frontend, backend, database, test, docs, and demo files.",
+            result=combined_result,
+            extra_trace=[
+                f"Generated {len(generated_file_results)} file content payload(s) individually.",
+            ],
+        )
+        return {
+            "agent_steps": [*progress_steps, final_step],
+            "graph_trace": [*progress_steps, final_step],
             "generated_artifacts": artifacts,
             "file_manifest": manifest,
+        }
+
+    def debug_generated_files(state: WorkflowState) -> dict[str, Any]:
+        debug_report = _debug_generated_artifacts(state["generated_artifacts"])
+        debug_artifact = {
+            "name": "docs/DEBUG_REPORT.md",
+            "kind": "markdown",
+            "mock_mode": False,
+            "summary": "Pre-commit debug report for generated files.",
+            "content": debug_report["content"],
+        }
+        issue_count = len(debug_report["issues"])
+        warning_count = len(debug_report["warnings"])
+        return {
+            **append_step(
+                state=state,
+                node_name="debug_generated_files",
+                status="completed",
+                message=(
+                    "Ran pre-commit generated-file debug checks."
+                    if issue_count == 0
+                    else "Ran pre-commit generated-file debug checks with issues."
+                ),
+                decision_trace=[
+                    f"Checked {len(state['generated_artifacts'])} generated artifact(s).",
+                    f"Found {issue_count} issue(s) and {warning_count} warning(s).",
+                    "Added docs/DEBUG_REPORT.md to make the debug pass visible in the repo.",
+                ],
+            ),
+            "generated_artifacts": [debug_artifact],
         }
 
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
@@ -666,7 +843,7 @@ def build_workflow(
                 tool_result=state.get("last_tool_result", {}),
             ),
             response_model=BlockerAnalysisOutput,
-            max_tokens=900,
+            max_tokens=4000,
             reasoning_effort="medium",
         )
         blocker_analysis = result.output.model_dump()
@@ -697,7 +874,7 @@ def build_workflow(
                 build_context=state.get("build_context", {}),
             ),
             response_model=FinalReadmeOutput,
-            max_tokens=1400,
+            max_tokens=4000,
             reasoning_effort="medium",
         )
         demo_result = await active_model_client.complete_structured(
@@ -709,7 +886,7 @@ def build_workflow(
                 build_context=state.get("build_context", {}),
             ),
             response_model=DemoScriptOutput,
-            max_tokens=1100,
+            max_tokens=3000,
             reasoning_effort="medium",
         )
         pitch_result = await active_model_client.complete_structured(
@@ -722,7 +899,7 @@ def build_workflow(
                 build_context=state.get("build_context", {}),
             ),
             response_model=PitchOutput,
-            max_tokens=1100,
+            max_tokens=3000,
             reasoning_effort="medium",
         )
         package_mode = _package_mode([readme_result, demo_result, pitch_result])
@@ -906,6 +1083,7 @@ def build_workflow(
     graph.add_node("plan_repo", plan_repo)
     graph.add_node("create_repo", create_repo)
     graph.add_node("generate_files", generate_files)
+    graph.add_node("debug_generated_files", debug_generated_files)
     graph.add_node("commit_progress", commit_progress)
     graph.add_node("verify_build", verify_build)
     graph.add_node("handle_blocker", handle_blocker)
@@ -934,7 +1112,8 @@ def build_workflow(
             "failed": "failed",
         },
     )
-    graph.add_edge("generate_files", "commit_progress")
+    graph.add_edge("generate_files", "debug_generated_files")
+    graph.add_edge("debug_generated_files", "commit_progress")
     graph.add_conditional_edges(
         "commit_progress",
         route_after_commit_progress,
@@ -1013,6 +1192,149 @@ def _files_from_generated_artifacts(artifacts: list[dict[str, Any]]) -> list[dic
         files.append({"path": path, "content": content})
 
     return files
+
+
+def _debug_generated_artifacts(artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    files = _files_from_generated_artifacts(artifacts)
+    paths = {file["path"] for file in files}
+    content_by_path = {file["path"]: file["content"] for file in files}
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    required_paths = ["README.md", "docs/ARCHITECTURE.md", "demo/demo_script.md"]
+    for path in required_paths:
+        if path not in paths:
+            issues.append(f"Missing required file: `{path}`.")
+
+    if not any(path in paths for path in ("package.json", "requirements.txt")):
+        issues.append("Missing a runnable dependency manifest: `package.json` or `requirements.txt`.")
+    if not any(path.startswith(("src/", "backend/")) for path in paths):
+        issues.append("Missing application source under `src/` or `backend/`.")
+    if "package.json" in paths and not any(path.startswith("src/") for path in paths):
+        warnings.append("`package.json` exists, but no frontend `src/` files were generated.")
+    if "requirements.txt" in paths and not any(path.startswith("backend/") for path in paths):
+        warnings.append("`requirements.txt` exists, but no `backend/` files were generated.")
+
+    for path, content in content_by_path.items():
+        if not content.strip():
+            issues.append(f"Empty generated file: `{path}`.")
+        if path.split("/")[-1] == ".env":
+            issues.append(f"Unsafe real env file was generated: `{path}`.")
+        if "TODO: implement" in content or "placeholder" in content.lower():
+            warnings.append(f"Possible placeholder content in `{path}`.")
+        if path == "package.json":
+            try:
+                package_json = json.loads(content)
+            except json.JSONDecodeError:
+                issues.append("`package.json` is not valid JSON.")
+            else:
+                package_issues, package_warnings = _debug_frontend_dependencies(
+                    package_json
+                )
+                issues.extend(package_issues)
+                warnings.extend(package_warnings)
+
+    status = "passed" if not issues else "needs attention"
+    lines = [
+        "# Debug Report",
+        "",
+        f"Status: {status}",
+        f"Files checked: {len(files)}",
+        f"Issues: {len(issues)}",
+        f"Warnings: {len(warnings)}",
+        "",
+        "## Issues",
+        "",
+        *(f"- {issue}" for issue in issues),
+        *(["- None"] if not issues else []),
+        "",
+        "## Warnings",
+        "",
+        *(f"- {warning}" for warning in warnings),
+        *(["- None"] if not warnings else []),
+        "",
+        "## Checked Files",
+        "",
+        *(f"- `{path}`" for path in sorted(paths)),
+        "",
+    ]
+    return {
+        "status": status,
+        "issues": issues,
+        "warnings": warnings,
+        "content": "\n".join(lines),
+    }
+
+
+def _debug_frontend_dependencies(package_json: Any) -> tuple[list[str], list[str]]:
+    if not isinstance(package_json, dict):
+        return ["`package.json` must be a JSON object."], []
+
+    deps = package_json.get("dependencies")
+    dev_deps = package_json.get("devDependencies")
+    all_deps: dict[str, str] = {}
+    for section in (deps, dev_deps):
+        if isinstance(section, dict):
+            all_deps.update(
+                {
+                    str(name): str(version)
+                    for name, version in section.items()
+                    if isinstance(name, str)
+                }
+            )
+
+    issues: list[str] = []
+    warnings: list[str] = []
+    minimum_majors = {
+        "vite": 8,
+        "@vitejs/plugin-react": 6,
+        "react": 19,
+        "react-dom": 19,
+    }
+    for package_name, minimum_major in minimum_majors.items():
+        version = all_deps.get(package_name)
+        if version is None:
+            if package_name in {"vite", "react", "react-dom"}:
+                issues.append(f"Missing frontend dependency `{package_name}`.")
+            else:
+                warnings.append(f"Missing frontend helper dependency `{package_name}`.")
+            continue
+        major = _major_version(version)
+        if major is None:
+            warnings.append(
+                f"Could not verify `{package_name}` version `{version}`."
+            )
+            continue
+        if major < minimum_major:
+            issues.append(
+                f"`{package_name}` is pinned to `{version}`; expected major {minimum_major} or newer."
+            )
+
+    react_version = all_deps.get("react")
+    react_dom_version = all_deps.get("react-dom")
+    if react_version and react_dom_version and react_version != react_dom_version:
+        warnings.append(
+            f"`react` ({react_version}) and `react-dom` ({react_dom_version}) should match."
+        )
+
+    if "vite" in all_deps and "@vitejs/plugin-react" in all_deps:
+        vite_major = _major_version(all_deps["vite"])
+        plugin_major = _major_version(all_deps["@vitejs/plugin-react"])
+        if vite_major is not None and plugin_major is not None:
+            if vite_major >= 8 and plugin_major < 6:
+                issues.append(
+                    "Vite 8 generated apps should use `@vitejs/plugin-react` major 6 or newer."
+                )
+
+    return issues, warnings
+
+
+def _major_version(version: str) -> int | None:
+    cleaned = version.strip()
+    for prefix in ("^", "~", ">=", "<=", ">", "<", "="):
+        cleaned = cleaned.removeprefix(prefix).strip()
+    first = cleaned.split(".", 1)[0]
+    return int(first) if first.isdigit() else None
 
 
 def _last_tool_call(state: WorkflowState, tool_name: str) -> dict[str, Any]:

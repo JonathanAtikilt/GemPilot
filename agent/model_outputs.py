@@ -47,6 +47,19 @@ class FileManifestOutput(TracedModelOutput):
     mode: ModelOutputMode
 
 
+class FilePlanOutput(TracedModelOutput):
+    artifacts: list[GeneratedArtifactOutput] = Field(min_length=1)
+    mode: ModelOutputMode
+
+
+class GeneratedFileOutput(TracedModelOutput):
+    name: str
+    kind: str
+    summary: str
+    content: str = Field(min_length=1)
+    mode: ModelOutputMode
+
+
 class BlockerAnalysisOutput(TracedModelOutput):
     blocker_type: str
     severity: Literal["low", "medium", "high", "critical"]

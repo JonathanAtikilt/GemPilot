@@ -16,7 +16,9 @@ def _context_contract() -> str:
         "Source material grounds the build. "
         "required RAG rules override user preference and MVPilot defaults. "
         "resolvedTechStack is binding for architecture/tests/files. "
-        "Surface missing or unreadable sources as warnings, not silent omissions."
+        "Surface missing or unreadable sources as warnings, not silent omissions. "
+        "When the live model produces the response, set any `mode` field to `live`; "
+        "do not use `mock` to describe a demo boundary."
     )
 
 
@@ -95,6 +97,53 @@ def build_file_manifest_prompt(
         "tests, README.md, docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, "
         "docs/BUILD_LOG.md, demo/demo_script.md, package.json and/or requirements.txt, "
         "and at least one file under src/ or backend/. Do not include secrets or a real .env file."
+    )
+
+
+def build_file_plan_prompt(
+    *,
+    idea: str,
+    repo_plan: dict[str, Any],
+    build_context: dict[str, Any],
+) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
+    return (
+        "Plan the generated MVP repo files. Do not write file contents.\n\n"
+        f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
+        f"Repo plan:\n{_json_block(repo_plan)}\n\n"
+        "Return artifact names, kinds, summaries, mode, and decision trace only. "
+        "The file list must be specific to the submitted idea and include README.md, "
+        "package.json and/or requirements.txt, frontend files, backend/API files, "
+        "tests, docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, docs/BUILD_LOG.md, "
+        "demo/demo_script.md, and at least one file under src/ or backend/. "
+        "Do not include file content, secrets, or a real .env file."
+    )
+
+
+def build_file_content_prompt(
+    *,
+    idea: str,
+    repo_plan: dict[str, Any],
+    build_context: dict[str, Any],
+    artifact: dict[str, Any],
+    file_plan: list[dict[str, Any]],
+) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
+    return (
+        "Generate one complete file for the MVP repo.\n\n"
+        f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
+        f"Repo plan:\n{_json_block(repo_plan)}\n\n"
+        f"Full file plan:\n{_json_block(file_plan)}\n\n"
+        f"Requested file:\n{_json_block(artifact)}\n\n"
+        "Return only this file's name, kind, summary, full text content, mode, "
+        "and decision trace. The file must be specific to the submitted idea, "
+        "coordinate with the full file plan, and be runnable or useful as committed. "
+        "Do not include secrets or a real .env file."
     )
 
 

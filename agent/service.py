@@ -94,6 +94,7 @@ class AgentService:
             retrieval=rag,
             audit=audit,
             github_connections=self._github_connections,
+            progress_callback=self._task_store.append_agent_steps,
         )
 
         try:

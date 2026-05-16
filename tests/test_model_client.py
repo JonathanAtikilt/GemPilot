@@ -88,7 +88,7 @@ async def test_deterministic_fallback_marks_trace_clearly():
 
 
 @pytest.mark.asyncio
-async def test_nemotron_client_posts_guided_json_and_parses_completion():
+async def test_nemotron_client_posts_schema_prompt_and_parses_completion():
     settings = live_settings()
     content = MvpScopeOutput(
         target_user="clinic referral coordinator",
@@ -122,8 +122,9 @@ async def test_nemotron_client_posts_guided_json_and_parses_completion():
     )
     assert posted["model"] == "nvidia/nemotron"
     assert posted["stream"] is False
-    assert posted["guided_json"]["title"] == "MvpScopeOutput"
+    assert "guided_json" not in posted
     assert posted["messages"][0]["role"] == "system"
+    assert "MvpScopeOutput" in posted["messages"][0]["content"]
     assert posted["messages"][1]["content"] == "Scope this MVP."
     assert posted["reasoning_effort"] == "medium"
     assert result.mode == "live"
@@ -190,7 +191,7 @@ async def test_nemotron_client_falls_back_when_live_key_is_missing():
     assert result.mode == "fallback"
     assert result.fallback_reason == "Missing NVIDIA_API_KEY for live mode."
     assert result.output.decision_trace[0] == (
-        "Fallback mode: NVIDIA endpoint unavailable."
+        "Fallback mode: Missing NVIDIA_API_KEY for live mode."
     )
 
 

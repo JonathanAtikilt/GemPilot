@@ -14,8 +14,10 @@ from agent.generated_project import build_project_artifacts
 from agent.model_outputs import (
     BlockerAnalysisOutput,
     DemoScriptOutput,
+    FilePlanOutput,
     FileManifestOutput,
     FinalReadmeOutput,
+    GeneratedFileOutput,
     MvpScopeOutput,
     PitchOutput,
     RepoPlanOutput,
@@ -213,6 +215,7 @@ class NemotronModelClient:
         reasoning_effort: str,
     ) -> dict:
         url = f"{self._settings.nemotron_base_url.rstrip('/')}/chat/completions"
+        schema = json.dumps(response_model.model_json_schema(), separators=(",", ":"))
         request_body = {
             "model": model,
             "messages": [
@@ -220,17 +223,18 @@ class NemotronModelClient:
                     "role": "system",
                     "content": (
                         "You are MVPilot's structured planning model. Return only "
-                        "JSON that matches the guided schema."
+                        "valid JSON. Do not include markdown fences, prose, or comments. "
+                        "The JSON must match this schema: "
+                        f"{schema}"
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
             "top_p": 0.95,
-            "max_tokens": max_tokens,
+            "max_tokens": max(800, max_tokens),
             "stream": False,
             "reasoning_effort": reasoning_effort,
-            "guided_json": response_model.model_json_schema(),
         }
         headers = {
             "Authorization": (
@@ -300,7 +304,11 @@ class NemotronModelClient:
     ) -> ModelCallResult[OutputT]:
         raw_content = self._extract_content(payload)
         try:
-            parsed = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+            parsed = (
+                json.loads(_strip_json_wrapper(raw_content))
+                if isinstance(raw_content, str)
+                else raw_content
+            )
         except json.JSONDecodeError as exc:
             raise ModelClientError("Nemotron returned invalid JSON.") from exc
 
@@ -310,6 +318,8 @@ class NemotronModelClient:
             raise ModelClientError(
                 "Nemotron response failed schema validation."
             ) from exc
+        if hasattr(output, "mode"):
+            output = output.model_copy(update={"mode": "live"})
 
         return ModelCallResult(
             output=output,
@@ -369,7 +379,13 @@ class NemotronModelClient:
             if isinstance(first_choice, dict):
                 message = first_choice.get("message")
                 if isinstance(message, dict) and "content" in message:
-                    return message["content"]
+                    content = message["content"]
+                    if content is not None:
+                        return content
+                    if message.get("reasoning_content") or message.get("reasoning"):
+                        raise ModelClientError(
+                            "Nemotron returned reasoning without completion content."
+                        )
                 if "text" in first_choice:
                     return first_choice["text"]
 
@@ -390,13 +406,26 @@ def _elapsed_ms(started: float) -> int:
     return max(0, round((perf_counter() - started) * 1000))
 
 
+def _strip_json_wrapper(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
+
+
 def _trace(
     mode: ModelMode,
     fallback_reason: str | None,
     entries: list[str],
 ) -> list[str]:
     if mode == "fallback":
-        return ["Fallback mode: NVIDIA endpoint unavailable.", *entries]
+        reason = fallback_reason or "Nemotron request failed."
+        return [f"Fallback mode: {reason}", *entries]
     return entries
 
 
@@ -440,6 +469,10 @@ def _deterministic_payload(
         return _repo_plan_payload(mode, fallback_reason, idea, prompt)
     if purpose == "file_manifest":
         return _file_manifest_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "file_plan":
+        return _file_plan_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "file_content":
+        return _file_content_payload(mode, fallback_reason, idea, prompt)
     if purpose == "final_readme":
         return _final_readme_payload(mode, fallback_reason, idea, prompt)
     if purpose == "demo_script":
@@ -672,6 +705,69 @@ def _file_manifest_payload(
                 f"Used resolved stack summary: {resolved_stack}.",
                 warning_summary or "No submitted source warnings were present.",
                 "Kept artifact content compact, commit-safe, and health-checkable.",
+            ],
+        ),
+    ).model_dump()
+
+
+def _file_plan_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
+    payload = _file_manifest_payload(mode, fallback_reason, idea, prompt)
+    artifacts = [
+        {key: value for key, value in artifact.items() if key != "content"}
+        for artifact in payload["artifacts"]
+    ]
+    return FilePlanOutput(
+        artifacts=artifacts,
+        mode=mode,
+        decision_trace=payload["decision_trace"],
+    ).model_dump()
+
+
+def _file_content_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
+    requested = _extract_json_section(prompt, "Requested file:\n")
+    requested_name = str(requested.get("name") or "README.md")
+    title = _project_title(idea, prompt)
+    resolved_stack = _extract_resolved_stack_summary(prompt)
+    repo_plan = _extract_json_section(prompt, "Repo plan:\n")
+    source_warnings = _source_warnings(prompt)
+    artifacts = build_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        repo_plan=repo_plan,
+        source_warnings=source_warnings,
+    )
+    selected = next(
+        (artifact for artifact in artifacts if artifact["name"] == requested_name),
+        {
+            "name": requested_name,
+            "kind": requested.get("kind") or "text",
+            "summary": requested.get("summary") or "Generated MVP file.",
+            "content": requested.get("summary") or "Generated MVP file.\n",
+        },
+    )
+    return GeneratedFileOutput(
+        name=str(selected["name"]),
+        kind=str(selected["kind"]),
+        summary=str(selected["summary"]),
+        content=str(selected["content"]),
+        mode=mode,
+        decision_trace=_trace(
+            mode,
+            fallback_reason,
+            [
+                f"Generated full content for {selected['name']}.",
+                "Kept file content coordinated with the planned repository structure.",
             ],
         ),
     ).model_dump()
