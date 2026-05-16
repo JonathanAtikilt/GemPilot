@@ -8,6 +8,8 @@ def test_frontend_uses_backend_owned_github_oauth_flow():
     source = FRONTEND_PAGE.read_text(encoding="utf-8")
 
     assert "/api/auth/github/login" in source
+    assert "/api/auth/github/config" in source
+    assert "/api/auth/github/use-env-token" in source
     assert "/api/auth/github/status" in source
     assert "/api/orchestrator/start-project" in source
     assert "rulesUrl" in source

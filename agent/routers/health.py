@@ -28,5 +28,8 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, object
         "rag_configured": rag_status["configured"],
         "rag_missing_env": rag_status["missing_required"],
         "rag_live_ready": settings.rag_live_ready,
+        "github_oauth_configured": settings.github_oauth_configured,
+        "github_pat_configured": settings.github_pat_configured,
+        "github_oauth_redirect_uri": settings.github_oauth_redirect_uri,
         "service": "mvpilot-agent",
     }

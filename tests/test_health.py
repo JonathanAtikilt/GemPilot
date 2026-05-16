@@ -9,6 +9,8 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
         "OPENCLAW_API_KEY",
+        "GITHUB_TOKEN",
+        "GITHUB_OWNER",
     ):
         monkeypatch.delenv(key, raising=False)
     app = create_app(settings=Settings(_env_file=None, adapter_mode="mock"))
@@ -37,6 +39,9 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
             "SUPABASE_SERVICE_ROLE_KEY",
         ],
         "rag_live_ready": False,
+        "github_oauth_configured": False,
+        "github_pat_configured": False,
+        "github_oauth_redirect_uri": "http://127.0.0.1:3001/api/auth/github/callback",
         "service": "mvpilot-agent",
     }
     assert "fake-nvidia" not in response.text

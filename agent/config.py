@@ -106,8 +106,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_CLIENT_SECRET"),
     )
     github_oauth_redirect_uri: str | None = Field(
-        default=None,
+        default="http://127.0.0.1:3001/api/auth/github/callback",
         validation_alias=AliasChoices("GITHUB_OAUTH_REDIRECT_URI", "GITHUB_REDIRECT_URI"),
+    )
+    github_personal_access_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="GITHUB_TOKEN",
+    )
+    github_owner: str | None = Field(
+        default=None,
+        validation_alias="GITHUB_OWNER",
     )
     github_token_encryption_key: SecretStr | None = Field(
         default=None,
@@ -140,6 +148,7 @@ class Settings(BaseSettings):
         "supabase_anon_key",
         "github_oauth_client_secret",
         "github_token_encryption_key",
+        "github_personal_access_token",
         mode="before",
     )
     @classmethod
@@ -189,6 +198,12 @@ class Settings(BaseSettings):
             and bool((self.github_oauth_redirect_uri or "").strip())
             and self._secret_has_value(self.github_oauth_client_secret)
             and self._secret_has_value(self.github_token_encryption_key)
+        )
+
+    @property
+    def github_pat_configured(self) -> bool:
+        return self._secret_has_value(self.github_personal_access_token) and bool(
+            (self.github_owner or "").strip()
         )
 
     @property

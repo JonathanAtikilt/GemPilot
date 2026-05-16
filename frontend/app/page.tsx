@@ -102,19 +102,42 @@ const sourceTypes = [
   "Optional uploaded README, PDF, TXT, or Markdown files",
 ];
 
-function readGithubConnectionId() {
-  if (typeof window === "undefined") return null;
+type GithubOAuthConfig = {
+  oauthConfigured: boolean;
+  patConfigured: boolean;
+  redirectUri?: string;
+  missingEnv?: string[];
+};
+
+function readGithubCallbackState(): {
+  connectionId: string | null;
+  error: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { connectionId: null, error: null };
+  }
 
   const params = new URLSearchParams(window.location.search);
   const connectionId = params.get("github_connection_id");
   const status = params.get("github_status");
+  const error = params.get("github_error");
+
+  if (status === "error") {
+    return { connectionId: null, error: error || "GitHub connection failed." };
+  }
 
   if (connectionId && status === "ready") {
     window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
-    return connectionId;
+    return { connectionId, error: null };
   }
 
-  return window.sessionStorage.getItem("mvpilot_github_connection_id");
+  const stored = window.sessionStorage.getItem("mvpilot_github_connection_id");
+  return { connectionId: stored, error: null };
+}
+
+function githubReturnTo() {
+  if (typeof window === "undefined") return "http://localhost:3000";
+  return `${window.location.origin}${window.location.pathname}`;
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -191,6 +214,7 @@ export default function Home() {
   const [existingRepoUrl, setExistingRepoUrl] = useState("");
   const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
+  const [githubOAuthConfig, setGithubOAuthConfig] = useState<GithubOAuthConfig | null>(null);
   const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo through the backend.");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
@@ -198,15 +222,32 @@ export default function Home() {
   const [message, setMessage] = useState("Ready for preflight. Add the build brief and launch MVPilot.");
 
   useEffect(() => {
-    Promise.resolve().then(() => {
-      const connectionId = readGithubConnectionId();
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+    const { connectionId, error } = readGithubCallbackState();
 
-      if (connectionId) {
-        setGithubConnectionId(connectionId);
-        setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    });
+    if (error) {
+      setGithubMessage(error);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (connectionId) {
+      setGithubConnectionId(connectionId);
+      setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (!apiBaseUrl) return;
+
+    fetch(`${apiBaseUrl}/api/auth/github/config`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config) => {
+        if (!config) return;
+        setGithubOAuthConfig(config as GithubOAuthConfig);
+        if (!connectionId && !error && config.patConfigured && !config.oauthConfigured) {
+          setGithubMessage(
+            "GitHub OAuth app is not configured on the backend. Use “Use backend token” or set GITHUB_OAUTH_* in .env.",
+          );
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -297,11 +338,48 @@ export default function Home() {
       return;
     }
 
+    if (githubOAuthConfig && !githubOAuthConfig.oauthConfigured) {
+      setGithubMessage(
+        `GitHub OAuth is not configured. Set ${(githubOAuthConfig.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_TOKEN_ENCRYPTION_KEY"]).join(", ")} in the backend .env, then register ${githubOAuthConfig.redirectUri || "the callback URL"} in your GitHub OAuth app.`,
+      );
+      return;
+    }
+
     const params = new URLSearchParams({
-      return_to: window.location.origin,
+      return_to: githubReturnTo(),
     });
 
     window.location.href = `${apiBaseUrl}/api/auth/github/login?${params.toString()}`;
+  }
+
+  async function connectGitHubWithEnvToken() {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+    if (!apiBaseUrl) {
+      setGithubMessage("Missing NEXT_PUBLIC_AGENT_API_URL.");
+      return;
+    }
+
+    const params = new URLSearchParams({ return_to: githubReturnTo() });
+    const response = await fetch(`${apiBaseUrl}/api/auth/github/use-env-token?${params.toString()}`, {
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setGithubMessage(typeof payload.detail === "string" ? payload.detail : "Backend GitHub token connection failed.");
+      return;
+    }
+
+    const connectionId = typeof payload.githubConnectionId === "string" ? payload.githubConnectionId : null;
+    if (!connectionId) {
+      setGithubMessage("Backend did not return a GitHub connection id.");
+      return;
+    }
+
+    window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
+    setGithubConnectionId(connectionId);
+    setGithubMessage(
+      payload.username ? `Using backend GITHUB_TOKEN as ${payload.username}.` : "Using backend GITHUB_TOKEN for this session.",
+    );
   }
 
   async function disconnectGitHub() {
@@ -501,7 +579,12 @@ export default function Home() {
                       {githubConnectionId ? (
                         <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
-                        <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect</button>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect OAuth</button>
+                          {githubOAuthConfig?.patConfigured ? (
+                            <button type="button" onClick={() => void connectGitHubWithEnvToken()} className="rounded border border-[#4edea3]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#4edea3] transition hover:bg-[#4edea3]/10">Use backend token</button>
+                          ) : null}
+                        </div>
                       )}
                     </div>
                     <div className="mt-3 flex items-start justify-between gap-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">

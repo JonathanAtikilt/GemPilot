@@ -8,7 +8,7 @@ from agent.rag.store import SupabaseRagStore
 async def test_search_memories():
     with patch("agent.rag.store.get_supabase_url", return_value="http://localhost"), \
          patch("agent.rag.store.get_supabase_service_role_key", return_value="key"), \
-         patch("agent.rag.store.create_client") as mock_create_client:
+         patch("supabase.create_client") as mock_create_client:
         
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
@@ -36,7 +36,7 @@ async def test_search_memories():
 async def test_write_memory():
     with patch("agent.rag.store.get_supabase_url", return_value="http://localhost"), \
          patch("agent.rag.store.get_supabase_service_role_key", return_value="key"), \
-         patch("agent.rag.store.create_client") as mock_create_client:
+         patch("supabase.create_client") as mock_create_client:
         
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,16 +33,37 @@ class GitHubUploadProjectRequest(BaseModel):
     githubConnectionId: str | None = None
 
 
+@auth_router.get("/config")
+async def github_oauth_config(
+    service: GitHubConnectionService = Depends(get_github_connection_service),
+) -> dict[str, object]:
+    return service.oauth_public_config()
+
+
+@auth_router.post("/use-env-token")
+async def github_use_env_token(
+    return_to: str | None = Query(default=None),
+    service: GitHubConnectionService = Depends(get_github_connection_service),
+) -> dict[str, object]:
+    try:
+        record = service.create_env_token_connection(return_to)
+    except GitHubOAuthError as exc:
+        raise _http_error(exc) from exc
+    return {
+        "connected": True,
+        "githubConnectionId": record.id,
+        "username": record.github_login,
+        "status": record.status,
+        "mode": "env_token",
+    }
+
+
 @router.get("/connect")
 async def connect_github(
     return_to: str | None = Query(default=None),
     service: GitHubConnectionService = Depends(get_github_connection_service),
 ) -> RedirectResponse:
-    try:
-        pending = service.create_pending_connection(return_to)
-    except GitHubOAuthError as exc:
-        raise _http_error(exc) from exc
-    return RedirectResponse(pending.authorization_url)
+    return await _start_github_oauth(return_to=return_to, service=service)
 
 
 @auth_router.get("/login")
@@ -51,7 +71,7 @@ async def login_github(
     return_to: str | None = Query(default=None),
     service: GitHubConnectionService = Depends(get_github_connection_service),
 ) -> RedirectResponse:
-    return await connect_github(return_to=return_to, service=service)
+    return await _start_github_oauth(return_to=return_to, service=service)
 
 
 @router.get("/callback")
@@ -59,18 +79,14 @@ async def github_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     service: GitHubConnectionService = Depends(get_github_connection_service),
+    return_to: str | None = Query(default=None),
 ) -> RedirectResponse:
-    if not code or not state:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid GitHub OAuth state",
-        )
-
-    try:
-        record = service.complete_callback(code=code, state=state)
-    except GitHubOAuthError as exc:
-        raise _http_error(exc) from exc
-    return RedirectResponse(service.redirect_url_for_completed_callback(record))
+    return await _complete_github_oauth(
+        code=code,
+        state=state,
+        return_to=return_to,
+        service=service,
+    )
 
 
 @auth_router.get("/callback")
@@ -78,8 +94,14 @@ async def github_auth_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     service: GitHubConnectionService = Depends(get_github_connection_service),
+    return_to: str | None = Query(default=None),
 ) -> RedirectResponse:
-    return await github_callback(code=code, state=state, service=service)
+    return await _complete_github_oauth(
+        code=code,
+        state=state,
+        return_to=return_to,
+        service=service,
+    )
 
 
 @auth_router.get("/status")
@@ -154,6 +176,37 @@ async def upload_project(
         "filesUploaded": output.get("changed_files") or [file.path for file in request.files],
         "errors": [],
     }
+
+
+async def _start_github_oauth(
+    *,
+    return_to: str | None,
+    service: GitHubConnectionService,
+) -> RedirectResponse:
+    try:
+        pending = service.create_pending_connection(return_to)
+    except GitHubOAuthError as exc:
+        return RedirectResponse(service.redirect_url_for_error(return_to, str(exc)))
+    return RedirectResponse(pending.authorization_url)
+
+
+async def _complete_github_oauth(
+    *,
+    code: str | None,
+    state: str | None,
+    return_to: str | None,
+    service: GitHubConnectionService,
+) -> RedirectResponse:
+    if not code or not state:
+        return RedirectResponse(
+            service.redirect_url_for_error(return_to, "GitHub did not return a valid authorization code.")
+        )
+
+    try:
+        record = service.complete_callback(code=code, state=state)
+    except GitHubOAuthError as exc:
+        return RedirectResponse(service.redirect_url_for_error(return_to, str(exc)))
+    return RedirectResponse(service.redirect_url_for_completed_callback(record))
 
 
 def _repo_name_from_url(repo_url: str | None) -> str | None:
