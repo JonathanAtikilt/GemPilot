@@ -223,7 +223,7 @@ def build_workflow(
         return {
             **append_model_step(
                 node_name="scope_mvp",
-                message="Scoped the MVP to a judge-friendly referral workflow.",
+                message="Scoped the MVP to one judge-friendly workflow.",
                 result=result,
             ),
             "mvp_scope": scope,

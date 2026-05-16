@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
+    "python-multipart",
     "python-dotenv",
     "httpx",
     "beautifulsoup4",

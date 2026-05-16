@@ -79,9 +79,14 @@ class DeterministicModelClient:
         max_tokens: int = 1200,
         reasoning_effort: str = "medium",
     ) -> ModelCallResult[OutputT]:
-        del prompt, max_tokens, reasoning_effort
+        del max_tokens, reasoning_effort
         started = perf_counter()
-        data = _deterministic_payload(purpose, self._mode, self._fallback_reason)
+        data = _deterministic_payload(
+            purpose,
+            self._mode,
+            self._fallback_reason,
+            prompt,
+        )
         output = response_model.model_validate(data)
         return ModelCallResult(
             output=output,
@@ -394,11 +399,42 @@ def _trace(
     return entries
 
 
+def _extract_idea(prompt: str) -> str:
+    marker = "Idea:\n"
+    if marker not in prompt:
+        return _clean_idea(prompt)
+
+    value = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+    return _clean_idea(value)
+
+
+def _clean_idea(value: str) -> str:
+    cleaned = " ".join(value.strip().split())
+    return cleaned or "the submitted MVP idea"
+
+
+def _idea_label(idea: str) -> str:
+    label = idea.rstrip(".")
+    return label if len(label) <= 90 else f"{label[:87].rstrip()}..."
+
+
+def _idea_title(idea: str) -> str:
+    label = _idea_label(idea)
+    lowered = label.lower()
+    for prefix in ("build a ", "build an ", "create a ", "make a "):
+        if lowered.startswith(prefix):
+            label = label[len(prefix):]
+            break
+    return label[:1].upper() + label[1:] if label else "Submitted MVP"
+
+
 def _deterministic_payload(
     purpose: str,
     mode: ModelMode,
     fallback_reason: str | None,
+    prompt: str,
 ) -> dict:
+    idea = _extract_idea(prompt)
     payloads = {
         "scope_mvp": _scope_payload,
         "plan_repo": _repo_plan_payload,
@@ -409,34 +445,36 @@ def _deterministic_payload(
         "pitch": _pitch_payload,
     }
     try:
-        return payloads[purpose](mode, fallback_reason)
+        return payloads[purpose](mode, fallback_reason, idea)
     except KeyError as exc:
         raise ModelClientError(f"Unsupported model purpose: {purpose}.") from exc
 
 
-def _scope_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _scope_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    label = _idea_label(idea)
     return MvpScopeOutput(
-        target_user="clinic referral coordinator",
+        target_user="primary user for the submitted MVP",
         must_have=[
-            "intake summary",
-            "blocked referral detection",
-            "next-best follow-up plan",
+            "clear user intake",
+            "source-grounded MVP scope",
+            "visible progress and final package",
         ],
-        demo_boundary="single mocked clinic workflow",
+        demo_boundary=f"one mocked workflow for: {label}",
         mode=mode,
         decision_trace=_trace(
             mode,
             fallback_reason,
             [
-                "Grounded the scope in healthcare referral coordination.",
+                f"Grounded the scope in the submitted idea: {label}.",
                 "Kept the MVP to one visible workflow for a short hackathon demo.",
-                "Rejected live EHR integration to keep the demo reliable.",
+                "Rejected broad integrations until the core demo path is reliable.",
             ],
         ),
     ).model_dump()
 
 
-def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    label = _idea_label(idea)
     return RepoPlanOutput(
         files=["README.md", "demo_script.md", "pitch.md"],
         test_plan=["unit workflow", "API integration", "mock build verify"],
@@ -449,7 +487,7 @@ def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
             mode,
             fallback_reason,
             [
-                "Selected a small artifact set that proves the agent loop.",
+                f"Selected a small artifact set for the submitted idea: {label}.",
                 "Preserved existing API response shape for the frontend.",
                 "Planned tests around workflow state instead of generated file IO.",
             ],
@@ -457,26 +495,27 @@ def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
     ).model_dump()
 
 
-def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    title = _idea_title(idea)
     return FileManifestOutput(
         artifacts=[
             {
                 "name": "README.md",
                 "kind": "markdown",
-                "summary": "Generated setup and referral agent overview.",
-                "content": "# MVPilot Referral Coordinator\n\nDemo package overview.",
+                "summary": "Generated setup and MVP overview.",
+                "content": f"# {title}\n\nGenerated demo package for: {idea}",
             },
             {
                 "name": "demo_script.md",
                 "kind": "markdown",
                 "summary": "Generated a three-minute demo script.",
-                "content": "# Demo Script\n\nShow intake, blocker, recovery, and final pitch.",
+                "content": f"# Demo Script\n\nShow the idea intake for: {idea}",
             },
             {
                 "name": "pitch.md",
                 "kind": "markdown",
                 "summary": "Generated a concise hackathon pitch.",
-                "content": "# Pitch\n\nMVPilot turns messy healthcare ideas into demo packages.",
+                "content": f"# Pitch\n\nMVPilot turns this idea into a demo package: {idea}",
             },
         ],
         mode=mode,
@@ -491,7 +530,8 @@ def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None) -> dict
     ).model_dump()
 
 
-def _blocker_analysis_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _blocker_analysis_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    label = _idea_label(idea)
     return BlockerAnalysisOutput(
         blocker_type="missing_demo_dependency",
         severity="medium",
@@ -509,6 +549,7 @@ def _blocker_analysis_payload(mode: ModelMode, fallback_reason: str | None) -> d
             mode,
             fallback_reason,
             [
+                f"Kept blocker analysis tied to the submitted idea: {label}.",
                 "Read the build tool result before applying recovery.",
                 "Chose a minimal recovery because the repo plan is otherwise sound.",
                 "Kept the blocker visible as proof of autonomous error handling.",
@@ -517,42 +558,44 @@ def _blocker_analysis_payload(mode: ModelMode, fallback_reason: str | None) -> d
     ).model_dump()
 
 
-def _final_readme_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _final_readme_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    title = _idea_title(idea)
     return FinalReadmeOutput(
-        title="MVPilot Referral Coordinator",
+        title=title,
         content=(
-            "# MVPilot Referral Coordinator\n\n"
-            "MVPilot turns a messy healthcare referral idea into a small demo "
-            "package with scoped requirements, generated artifacts, build "
+            f"# {title}\n\n"
+            f"MVPilot turned this submitted idea into a small demo package: {idea}\n\n"
+            "The package includes scoped requirements, generated artifacts, build "
             "verification, blocker recovery, and a judge-ready final summary."
         ),
         setup_steps=[
             "Install dependencies.",
             "Run the FastAPI backend in mock mode.",
-            "Submit the healthcare referral idea through the dashboard.",
+            "Submit the idea through the dashboard.",
         ],
         decision_trace=_trace(
             mode,
             fallback_reason,
             [
-                "Summarized the workflow around the visible referral use case.",
+                "Summarized the workflow around the submitted idea.",
                 "Included setup steps that work without live external services.",
             ],
         ),
     ).model_dump()
 
 
-def _demo_script_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _demo_script_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    title = _idea_title(idea)
     return DemoScriptOutput(
-        title="Three-minute referral recovery demo",
+        title=f"Three-minute {title} demo",
         content=(
-            "Open with a clinic referral coordinator receiving a messy request. "
+            f"Open with the submitted idea: {idea}. "
             "Show MVPilot retrieving context, scoping the MVP, generating repo "
             "artifacts, hitting a build blocker, applying recovery, and ending "
             "with README, script, and pitch content."
         ),
         beats=[
-            "Enter the referral coordination idea.",
+            "Enter the project idea.",
             "Watch the graph trace fill with model-backed decisions.",
             "Show the recoverable build blocker and recovery step.",
             "Close on the generated package and pitch.",
@@ -568,15 +611,16 @@ def _demo_script_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
     ).model_dump()
 
 
-def _pitch_payload(mode: ModelMode, fallback_reason: str | None) -> dict:
+def _pitch_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+    label = _idea_label(idea)
     return PitchOutput(
         title="MVPilot",
         tagline="An AI teammate that turns messy hackathon ideas into demo packages.",
         content=(
-            "MVPilot helps teams move from idea to credible MVP evidence fast. "
-            "For healthcare referrals, it scopes the workflow, plans the repo, "
-            "generates artifacts, catches a build blocker, recovers, and produces "
-            "the final README, demo script, and pitch."
+            f"MVPilot helps teams move from idea to credible MVP evidence fast. "
+            f"For this submitted idea, {label}, it scopes the workflow, plans "
+            "the repo, generates artifacts, catches a build blocker, recovers, "
+            "and produces the final README, demo script, and pitch."
         ),
         proof_points=[
             "Stable FastAPI task contracts for frontend integration.",
