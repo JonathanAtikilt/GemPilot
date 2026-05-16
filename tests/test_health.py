@@ -16,10 +16,19 @@ def test_health_returns_mock_defaults_without_secret_values(client):
         "nemotron_fast_model": "nvidia/nvidia-nemotron-nano-9b-v2",
         "nvidia_configured": False,
         "openclaw_configured": False,
+        "openclaw_env": None,
+        "supabase_configured": False,
+        "rag_configured": False,
+        "rag_missing_env": [
+            "NVIDIA_API_KEY",
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+        ],
+        "rag_live_ready": False,
         "service": "mvpilot-agent",
     }
-    assert "NVIDIA_API_KEY" not in response.text
-    assert "OPENCLAW_API_KEY" not in response.text
+    assert "fake-nvidia" not in response.text
+    assert "fake-openclaw" not in response.text
 
 
 def test_health_is_degraded_when_live_mode_lacks_nvidia_config():
@@ -65,3 +74,23 @@ def test_settings_load_from_environment_without_requiring_real_keys(monkeypatch)
     assert settings.nvidia_configured is True
     assert settings.openclaw_configured is True
     assert "fake-nvidia-key" not in settings.model_dump_json()
+
+
+def test_health_reports_rag_configured_when_supabase_and_nvidia_set(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-nvidia-key")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role")
+    monkeypatch.setenv("OPENCLAW_API_KEY", "fake-openclaw-key")
+    monkeypatch.setenv("OPENCLAW_ENV", "development")
+
+    app = create_app(settings=Settings(_env_file=None, adapter_mode="mock"))
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    data = response.json()
+    assert data["rag_configured"] is True
+    assert data["rag_missing_env"] == []
+    assert data["rag_live_ready"] is True
+    assert data["supabase_configured"] is True
+    assert data["openclaw_env"] == "development"
