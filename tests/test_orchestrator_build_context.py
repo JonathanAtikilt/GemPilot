@@ -1,15 +1,14 @@
 import pytest
 
-from agent.adapters import InMemoryRagMemoryAdapter
 from agent.config import Settings
+from agent.live_adapters import LiveRagMemoryAdapter
 from agent.workflow import build_initial_state, build_workflow
 
 
 @pytest.mark.asyncio
-async def test_retrieve_context_node_populates_build_context_for_nemotron() -> None:
+async def test_retrieve_context_node_populates_build_context_for_nemotron(mock_live_rag_search) -> None:
     settings = Settings(_env_file=None, adapter_mode="mock")
-    rag = InMemoryRagMemoryAdapter()
-    workflow = build_workflow(settings, retrieval=rag)
+    workflow = build_workflow(settings, retrieval=LiveRagMemoryAdapter())
     state = build_initial_state(
         task_id="task-build-context",
         idea="Autonomous hackathon teammate with RAG and GitHub tools",
@@ -22,13 +21,12 @@ async def test_retrieve_context_node_populates_build_context_for_nemotron() -> N
     merged = {**state, **update}
 
     build_context = merged["build_context"]
-    assert build_context["mode"] == "mock"
+    assert build_context["mode"] == "live"
     assert len(build_context["requiredDeliverables"]) >= 1
     assert len(build_context["allowedToolsAndAPIs"]) >= 1
     assert len(build_context["requiredRepositoryFormat"]) >= 1
     assert len(build_context["requiredDemoFormat"]) >= 1
     assert len(build_context["requiredTechStackPieces"]) >= 1
-    assert build_context["scopeWarnings"]
     assert merged["retrieved_docs"]
     assert merged["memory_matches"]
 

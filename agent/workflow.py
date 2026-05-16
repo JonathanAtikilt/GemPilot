@@ -32,7 +32,8 @@ from agent.prompts import (
     build_scope_mvp_prompt,
 )
 from agent.schemas import AgentStep
-from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
+from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryToolAdapter
+from agent.live_adapters import LiveRagMemoryAdapter
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
 StepReducer = Annotated[list[AgentStep], operator.add]
@@ -107,7 +108,7 @@ def build_workflow(
 ):
     active_audit = audit or InMemoryAuditAdapter(model_name=settings.nemotron_fast_model)
     active_model_client = model_client or _build_default_model_client(settings)
-    active_retrieval = retrieval or InMemoryRagMemoryAdapter()
+    active_retrieval = retrieval or LiveRagMemoryAdapter()
     active_tools = tools or InMemoryToolAdapter()
 
     def append_step(

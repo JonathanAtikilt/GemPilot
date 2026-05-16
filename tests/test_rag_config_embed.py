@@ -42,7 +42,7 @@ async def test_embed_text_requires_nvidia_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rerank_chunks_returns_vector_order_without_key(monkeypatch) -> None:
+async def test_rerank_chunks_requires_nvidia_key(monkeypatch) -> None:
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     chunks = [
         RagSearchResult(
@@ -56,7 +56,5 @@ async def test_rerank_chunks_returns_vector_order_without_key(monkeypatch) -> No
         )
     ]
 
-    ranked, warning = await rerank_chunks("query", chunks)
-
-    assert ranked == chunks
-    assert warning == "Reranking skipped because NVIDIA_API_KEY is missing."
+    with pytest.raises(RagConfigurationError, match="Missing NVIDIA_API_KEY"):
+        await rerank_chunks("query", chunks)

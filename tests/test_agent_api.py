@@ -69,7 +69,7 @@ def test_run_agent_rejects_invalid_repo_visibility(client):
     assert response.status_code == 422
 
 
-def test_task_detail_returns_populated_workflow_dashboard(client):
+def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_search):
     task_id = start_task(client)
 
     response = client.get(f"/agent/tasks/{task_id}")

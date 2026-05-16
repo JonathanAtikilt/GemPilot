@@ -11,7 +11,7 @@ async def test_live_rag_memory_adapter():
     with patch("agent.live_adapters.search_rag", new_callable=AsyncMock) as mock_search:
         mock_result = MagicMock()
         mock_result.model_dump.return_value = {"id": "mock_chunk"}
-        mock_search.return_value = ([mock_result], None)
+        mock_search.return_value = [mock_result]
         
         docs = await adapter.retrieve_hackathon_context("test")
         assert docs == [{"id": "mock_chunk"}]
@@ -61,16 +61,15 @@ async def test_live_rag_memory_adapter_retrieve_build_context():
 
 
 @pytest.mark.asyncio
-async def test_live_rag_memory_adapter_build_context_falls_back_without_rag_config():
+async def test_live_rag_memory_adapter_build_context_raises_without_rag_config():
     adapter = LiveRagMemoryAdapter()
     with patch(
         "agent.live_adapters.get_build_context",
         new_callable=AsyncMock,
         side_effect=RagConfigurationError("missing config"),
     ):
-        payload = await adapter.retrieve_build_context("task-1", "hackathon agent idea")
-        assert payload["mode"] == "fallback"
-        assert payload["requiredDeliverables"]
+        with pytest.raises(RagConfigurationError, match="missing config"):
+            await adapter.retrieve_build_context("task-1", "hackathon agent idea")
 
 
 def test_live_tool_adapter():
