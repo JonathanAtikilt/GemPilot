@@ -39,6 +39,10 @@ def test_settings_load_from_environment_without_requiring_real_keys(monkeypatch)
     monkeypatch.setenv("NEMOTRON_MODEL", "nvidia/custom-model")
     monkeypatch.setenv("NEMOTRON_FAST_MODEL", "nvidia/custom-fast-model")
     monkeypatch.setenv("NEMOTRON_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("NEMOTRON_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("NEMOTRON_MAX_RETRIES", "2")
+    monkeypatch.setenv("NEMOTRON_POLL_ATTEMPTS", "4")
+    monkeypatch.setenv("NEMOTRON_POLL_INTERVAL_SECONDS", "0.5")
     monkeypatch.setenv(
         "CORS_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
@@ -50,6 +54,10 @@ def test_settings_load_from_environment_without_requiring_real_keys(monkeypatch)
     assert settings.nemotron_model == "nvidia/custom-model"
     assert settings.nemotron_fast_model == "nvidia/custom-fast-model"
     assert str(settings.nemotron_base_url) == "https://example.test/v1"
+    assert settings.nemotron_timeout_seconds == 12
+    assert settings.nemotron_max_retries == 2
+    assert settings.nemotron_poll_attempts == 4
+    assert settings.nemotron_poll_interval_seconds == 0.5
     assert settings.cors_origins == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

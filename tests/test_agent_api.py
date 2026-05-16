@@ -109,6 +109,10 @@ def test_task_detail_returns_populated_workflow_dashboard(client):
         "final_report.json",
     }
     assert data["final_report"]["status"] == "completed"
+    assert data["final_report"]["readme"]["content"]
+    assert data["final_report"]["demo_script"]["content"]
+    assert data["final_report"]["pitch"]["content"]
+    assert data["final_report"]["blocker_analysis"]["blocker_type"]
     assert [step["node_name"] for step in data["graph_trace"]] == [
         "receive_idea",
         "retrieve_context",
@@ -127,6 +131,16 @@ def test_task_detail_returns_populated_workflow_dashboard(client):
     assert data["agent_steps"] == data["graph_trace"]
     assert all(step["model"] for step in data["agent_steps"])
     assert all(step["decision_trace"] for step in data["agent_steps"])
+    model_steps = [step for step in data["agent_steps"] if step["prompt_purpose"]]
+    assert {step["prompt_purpose"] for step in model_steps} == {
+        "scope_mvp",
+        "plan_repo",
+        "file_manifest",
+        "blocker_analysis",
+        "final_package",
+    }
+    assert all(step["model_mode"] == "mock" for step in model_steps)
+    assert "fake-nvidia-key" not in response.text
 
 
 def test_task_detail_returns_404_for_missing_tasks(client):
