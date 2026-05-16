@@ -225,6 +225,70 @@ class Person3GitHubToolTests(unittest.TestCase):
         self.assertEqual(result["output"]["attempts"], 2)
         self.assertEqual(commit_files_mock.call_count, 2)
 
+    def test_append_build_log_polls_after_live_commit_before_failing_verification(self):
+        with (
+            patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "false", "GITHUB_TOKEN": "token", "GITHUB_OWNER": "owner"}, clear=True),
+            patch("tools.repo_writer.GitHubClient") as client_class,
+            patch("tools.repo_writer.commit_files") as commit_files_mock,
+            patch("tools.repo_writer.sleep") as sleep_mock,
+            patch("tools.repo_writer._format_log_entry", return_value="- fixed | task=task-1 | Committed files\n"),
+        ):
+            client = client_class.return_value
+            commit_files_mock.return_value = {
+                "tool_name": "github.commit_files",
+                "status": "success",
+                "verification_status": "verified",
+                "output": {"commit_sha": "abc123"},
+                "error": None,
+            }
+            client.get_file_text.side_effect = [
+                "# MVPilot Build Log\n\n",
+                "# MVPilot Build Log\n\n",
+                "# MVPilot Build Log\n\n- fixed | task=task-1 | Committed files\n",
+            ]
+
+            result = append_build_log("task-1", "mvpilot-generated-demo", "Committed files", {})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["output"]["attempts"], 1)
+        self.assertEqual(result["output"]["verification_attempts"], 2)
+        self.assertEqual(commit_files_mock.call_count, 1)
+        sleep_mock.assert_called_once()
+
+    def test_append_build_log_accepts_verified_commit_when_contents_api_lags(self):
+        with (
+            patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "false", "GITHUB_TOKEN": "token", "GITHUB_OWNER": "owner"}, clear=True),
+            patch("tools.repo_writer.GitHubClient") as client_class,
+            patch("tools.repo_writer.commit_files") as commit_files_mock,
+            patch("tools.repo_writer.verify_commit") as verify_commit_mock,
+            patch("tools.repo_writer.sleep"),
+            patch("tools.repo_writer._format_log_entry", return_value="- fixed | task=task-1 | Committed files\n"),
+        ):
+            client = client_class.return_value
+            commit_files_mock.return_value = {
+                "tool_name": "github.commit_files",
+                "status": "success",
+                "verification_status": "verified",
+                "output": {"commit_sha": "abc123"},
+                "error": None,
+            }
+            client.get_file_text.return_value = "# MVPilot Build Log\n\n"
+            verify_commit_mock.return_value = {
+                "tool_name": "github.verify_commit",
+                "status": "success",
+                "verification_status": "verified",
+                "output": {"commit_sha": "abc123", "files_changed": ["logs/build_log.md"]},
+                "error": None,
+            }
+
+            result = append_build_log("task-1", "mvpilot-generated-demo", "Committed files", {})
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["output"]["verified"])
+        self.assertFalse(result["output"]["content_verified"])
+        self.assertTrue(result["output"]["commit_verified"])
+        self.assertEqual(result["output"]["verification_method"], "commit")
+
     def test_repo_health_passes_for_complete_mock_repo(self):
         with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):
             commit_files(
