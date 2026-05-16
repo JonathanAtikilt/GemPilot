@@ -113,6 +113,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="GITHUB_TOKEN",
     )
+    github_env_token_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="GITHUB_ENV_TOKEN_FALLBACK_ENABLED",
+    )
     github_owner: str | None = Field(
         default=None,
         validation_alias="GITHUB_OWNER",

@@ -51,6 +51,7 @@ class InMemoryTaskStore:
             repo_visibility=request.repo_visibility,
             repo_preference=request.repo_preference,
             repo_name=request.repo_name,
+            repo_description=request.repo_description,
             repo_url=request.repo_url,
             branch=request.branch,
             demo_mode=request.demo_mode,

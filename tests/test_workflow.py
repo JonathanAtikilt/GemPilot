@@ -93,8 +93,9 @@ class FakeGitHubConnections:
         self,
         connection_id: str,
         *,
-        task_id: str,
+        task_id: str | None,
     ) -> GitHubWorkflowAuth:
+        assert task_id is not None
         self.exchanged.append((connection_id, task_id))
         return GitHubWorkflowAuth(
             connection_id=connection_id,
@@ -124,6 +125,7 @@ class RecordingToolAdapter(InMemoryToolAdapter):
         *,
         repo_preference: str = "create_new_repo",
         repo_name: str | None = None,
+        repo_description: str | None = None,
         repo_url: str | None = None,
     ) -> dict:
         self.create_repo_owner = self.github_config.owner if self.github_config else None
@@ -132,6 +134,7 @@ class RecordingToolAdapter(InMemoryToolAdapter):
             visibility,
             repo_preference=repo_preference,
             repo_name=repo_name,
+            repo_description=repo_description,
             repo_url=repo_url,
         )
 
@@ -185,8 +188,15 @@ async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_sear
     assert detail.final_report["mode"] == "mock"
     assert {artifact["name"] for artifact in detail.generated_artifacts} >= {
         "README.md",
+        "package.json",
+        "src/App.jsx",
+        "backend/main.py",
+        "backend/mvp_engine.py",
+        "tests/test_backend.py",
         "docs/ARCHITECTURE.md",
         "docs/BUILD_LOG.md",
+        "docs/DATABASE_SCHEMA.sql",
+        "docs/IMPLEMENTATION_PLAN.md",
         "demo/demo_script.md",
         "final_report.json",
     }
@@ -335,20 +345,14 @@ async def test_live_workflow_missing_github_connection_retrieves_context_then_fa
     assert [step.node_name for step in final_state["graph_trace"]] == [
         "receive_idea",
         "exchange_github_code",
-        "retrieve_context",
-        "scope_mvp",
-        "plan_repo",
-        "create_repo",
         "failed",
     ]
-    assert "Live GitHub connection is required" in final_state["failure_reason"]
-    create_repo_calls = [
+    assert "GitHub is not connected" in final_state["failure_reason"]
+    assert not [
         tool_call
         for tool_call in final_state["tool_calls"]
         if tool_call.get("tool") == "github.create_repo"
     ]
-    assert len(create_repo_calls) == 1
-    assert create_repo_calls[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio

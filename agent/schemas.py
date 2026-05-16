@@ -66,6 +66,10 @@ class RunAgentRequest(BaseModel):
         default=None,
         validation_alias=AliasChoices("repo_name", "repoName"),
     )
+    repo_description: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_description", "repoDescription"),
+    )
     repo_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("repo_url", "repoUrl"),
@@ -98,6 +102,7 @@ class RunAgentRequest(BaseModel):
         "primary_rules_url",
         "rules_url",
         "repo_name",
+        "repo_description",
         "repo_url",
         "branch",
         "github_connection_id",
@@ -168,6 +173,7 @@ class TaskRecord(BaseModel):
     repo_visibility: RepoVisibility
     repo_preference: RepoPreference = "create_new_repo"
     repo_name: str | None = None
+    repo_description: str | None = None
     repo_url: str | None = None
     branch: str = "main"
     demo_mode: bool

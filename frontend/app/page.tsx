@@ -7,6 +7,7 @@ type AdditionalSourceType = "url" | "file";
 type RepoPreference = "create_new_repo" | "use_existing_repo";
 type RepoVisibility = "private" | "public";
 type FlightStageKey = "preflight" | "radar_scan" | "flight_plan" | "autopilot" | "black_box" | "landed";
+type GithubStatus = "not_connected" | "connecting" | "connected" | "error";
 
 type AgentStep = {
   key: FlightStageKey;
@@ -22,6 +23,7 @@ type WorkflowStep = {
   message: string;
   flight_stage?: string | null;
   agent?: string | null;
+  timestamp?: string;
 };
 
 type RagEvidence = {
@@ -56,6 +58,7 @@ type TaskDetail = {
     id: string;
     status: string;
     repo_visibility: RepoVisibility;
+    repo_description?: string | null;
   };
   agent_steps: WorkflowStep[];
   build_context?: {
@@ -97,45 +100,45 @@ const flightStops: AgentStep[] = [
 ];
 
 const sourceTypes = [
-  "Primary hackathon rules URL",
+  "Optional product, rules, or API documentation URL",
   "Additional OpenClaw or Nemotron documentation URLs",
-  "Optional uploaded README, PDF, TXT, or Markdown files",
+  "Optional uploaded README, TXT, Markdown, JSON, or CSV files",
 ];
 
 type GithubOAuthConfig = {
   oauthConfigured: boolean;
-  patConfigured: boolean;
-  patTokenType?: string | null;
-  canCreateRepositories?: boolean;
-  recommendedRepoPreference?: RepoPreference;
   redirectUri?: string;
   missingEnv?: string[];
 };
 
 function readGithubCallbackState(): {
   connectionId: string | null;
+  username: string | null;
   error: string | null;
 } {
   if (typeof window === "undefined") {
-    return { connectionId: null, error: null };
+    return { connectionId: null, username: null, error: null };
   }
 
   const params = new URLSearchParams(window.location.search);
   const connectionId = params.get("github_connection_id");
   const status = params.get("github_status");
   const error = params.get("github_error");
+  const username = params.get("github_username");
 
   if (status === "error") {
-    return { connectionId: null, error: error || "GitHub connection failed." };
+    return { connectionId: null, username: null, error: error || "GitHub connection failed." };
   }
 
-  if (connectionId && status === "ready") {
+  if (connectionId && (status === "connected" || status === "ready")) {
     window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
-    return { connectionId, error: null };
+    if (username) window.sessionStorage.setItem("mvpilot_github_username", username);
+    return { connectionId, username, error: null };
   }
 
   const stored = window.sessionStorage.getItem("mvpilot_github_connection_id");
-  return { connectionId: stored, error: null };
+  const storedUsername = window.sessionStorage.getItem("mvpilot_github_username");
+  return { connectionId: stored, username: storedUsername, error: null };
 }
 
 function githubReturnTo() {
@@ -146,10 +149,9 @@ function githubReturnTo() {
 function formatWorkflowError(message: string): string {
   if (message.includes("Resource not accessible by personal access token")) {
     return [
-      "GitHub rejected repo creation: this token cannot create new repositories.",
-      "Your GITHUB_TOKEN looks like a fine-grained PAT (github_pat_…). Those cannot call POST /user/repos.",
-      "Use “Use existing repo” and paste a repo URL you own, with Contents read/write on that repo.",
-      "Or replace GITHUB_TOKEN with a classic PAT (ghp_…) that has the repo scope, then restart the backend and Use backend token again.",
+      "GitHub rejected repo creation for the connected OAuth session.",
+      "Reconnect GitHub and confirm the OAuth app requested the repo scope.",
+      "You can also choose an existing repository that your account can write to.",
     ].join(" ");
   }
   if (message.includes("already exists") || message.includes("name already exists")) {
@@ -163,6 +165,20 @@ function formatWorkflowError(message: string): string {
     ].join(" ");
   }
   return message;
+}
+
+function githubStatusPill(status: GithubStatus): StepStatus {
+  if (status === "connected") return "Complete";
+  if (status === "connecting") return "Running";
+  if (status === "error") return "Failed";
+  return "Ready";
+}
+
+function githubStatusLabel(status: GithubStatus): string {
+  if (status === "connected") return "Connected";
+  if (status === "connecting") return "Connecting";
+  if (status === "error") return "Error";
+  return "Not connected";
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -231,7 +247,8 @@ function deriveFlightStageState(taskDetail: TaskDetail | null, hasLaunched: bool
 export default function Home() {
   const [projectTitle, setProjectTitle] = useState(defaultTitle);
   const [idea, setIdea] = useState(defaultIdea);
-  const [primaryRulesUrl, setPrimaryRulesUrl] = useState("https://developer.nvidia.com/");
+  const [repoDescription, setRepoDescription] = useState("A generated MVP built by MVPilot from the submitted idea.");
+  const [primaryRulesUrl, setPrimaryRulesUrl] = useState("");
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
   const [repoPreference, setRepoPreference] = useState<RepoPreference>("create_new_repo");
@@ -239,8 +256,10 @@ export default function Home() {
   const [existingRepoUrl, setExistingRepoUrl] = useState("");
   const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
+  const [githubUsername, setGithubUsername] = useState<string | null>(null);
+  const [githubStatus, setGithubStatus] = useState<GithubStatus>("not_connected");
   const [githubOAuthConfig, setGithubOAuthConfig] = useState<GithubOAuthConfig | null>(null);
-  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo through the backend.");
+  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create the project repo through backend OAuth.");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "sent" | "mocked" | "error">("idle");
@@ -248,15 +267,24 @@ export default function Home() {
 
   useEffect(() => {
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
-    const { connectionId, error } = readGithubCallbackState();
+    const { connectionId, username, error } = readGithubCallbackState();
+    const wasConnecting = window.sessionStorage.getItem("mvpilot_github_connecting") === "true";
 
     if (error) {
       setGithubMessage(error);
+      setGithubStatus("error");
+      window.sessionStorage.removeItem("mvpilot_github_connecting");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (connectionId) {
       setGithubConnectionId(connectionId);
-      setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
+      setGithubUsername(username);
+      setGithubStatus("connected");
+      setGithubMessage(username ? `Connected as ${username}.` : "GitHub connected. Repo creation is ready.");
+      window.sessionStorage.removeItem("mvpilot_github_connecting");
       window.history.replaceState({}, "", window.location.pathname);
+    } else if (wasConnecting) {
+      setGithubStatus("connecting");
+      setGithubMessage("Waiting for GitHub OAuth to finish...");
     }
 
     const storedTaskId = window.sessionStorage.getItem("mvpilot_task_id");
@@ -274,14 +302,10 @@ export default function Home() {
         if (!config) return;
         const typed = config as GithubOAuthConfig;
         setGithubOAuthConfig(typed);
-        if (typed.recommendedRepoPreference === "use_existing_repo") {
-          setRepoPreference("use_existing_repo");
-        }
-        if (!connectionId && !error && typed.patConfigured && !typed.oauthConfigured) {
+        if (!connectionId && !error && !typed.oauthConfigured) {
+          setGithubStatus("error");
           setGithubMessage(
-            typed.canCreateRepositories === false
-              ? "Fine-grained PAT detected: use “Use existing repo” (create new repo needs a classic ghp_ token with repo scope)."
-              : "GitHub OAuth app is not configured on the backend. Use “Use backend token” or set GITHUB_OAUTH_* in .env.",
+            `GitHub OAuth is not configured. Add ${(typed.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"]).join(", ")} and register ${typed.redirectUri || "the backend callback URL"}.`,
           );
         }
       })
@@ -351,11 +375,12 @@ export default function Home() {
         })),
       repoPreference,
       repoName: repoPreference === "create_new_repo" ? requestedRepoName.trim() || null : null,
+      repoDescription: repoDescription.trim() || null,
       repoUrl: repoPreference === "use_existing_repo" ? existingRepoUrl.trim() || null : null,
       visibility,
       source: "mvpilot_frontend",
     }),
-    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectTitle, repoPreference, requestedRepoName, visibility],
+    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectTitle, repoDescription, repoPreference, requestedRepoName, visibility],
   );
 
   const hasLaunched = Boolean(taskId);
@@ -373,12 +398,36 @@ export default function Home() {
   const buildLogArtifact = taskDetail?.generated_artifacts?.find((artifact) => artifact.name === "docs/BUILD_LOG.md");
   const additionalUrlCount = payloadPreview.referenceUrls.length;
   const additionalFileCount = payloadPreview.additional_files.length;
+  const activityLog = useMemo(() => {
+    const rows: WorkflowStep[] = [];
+    if (githubConnectionId) {
+      rows.push({
+        node_name: "github_connected",
+        status: "completed",
+        message: githubUsername ? `GitHub connected as ${githubUsername}.` : "GitHub connected.",
+        flight_stage: "preflight",
+        agent: "github",
+      });
+    }
+    rows.push(...(taskDetail?.agent_steps ?? []));
+    if (repoUrl) {
+      rows.push({
+        node_name: "repo_ready",
+        status: "completed",
+        message: "Final GitHub repository link is ready.",
+        flight_stage: "landed",
+        agent: "github",
+      });
+    }
+    return rows;
+  }, [githubConnectionId, githubUsername, repoUrl, taskDetail?.agent_steps]);
 
   function connectGitHub() {
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
 
     if (!apiBaseUrl) {
       setGithubMessage("Missing NEXT_PUBLIC_AGENT_API_URL. Start the FastAPI backend URL before connecting GitHub.");
+      setGithubStatus("error");
       return;
     }
 
@@ -386,43 +435,13 @@ export default function Home() {
       return_to: githubReturnTo(),
     });
 
-    // Always hit the backend login route. If OAuth is not configured, the backend redirects
-    // back with github_status=error so readGithubCallbackState() can surface the message.
+    setGithubStatus("connecting");
+    setGithubMessage("Opening GitHub OAuth...");
+    window.sessionStorage.setItem("mvpilot_github_connecting", "true");
     window.location.assign(`${apiBaseUrl}/api/auth/github/login?${params.toString()}`);
   }
 
   const oauthReady = githubOAuthConfig?.oauthConfigured === true;
-  const patReady = githubOAuthConfig?.patConfigured === true;
-
-  async function connectGitHubWithEnvToken() {
-    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
-    if (!apiBaseUrl) {
-      setGithubMessage("Missing NEXT_PUBLIC_AGENT_API_URL.");
-      return;
-    }
-
-    const params = new URLSearchParams({ return_to: githubReturnTo() });
-    const response = await fetch(`${apiBaseUrl}/api/auth/github/use-env-token?${params.toString()}`, {
-      method: "POST",
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setGithubMessage(typeof payload.detail === "string" ? payload.detail : "Backend GitHub token connection failed.");
-      return;
-    }
-
-    const connectionId = typeof payload.githubConnectionId === "string" ? payload.githubConnectionId : null;
-    if (!connectionId) {
-      setGithubMessage("Backend did not return a GitHub connection id.");
-      return;
-    }
-
-    window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
-    setGithubConnectionId(connectionId);
-    setGithubMessage(
-      payload.username ? `Using backend GITHUB_TOKEN as ${payload.username}.` : "Using backend GITHUB_TOKEN for this session.",
-    );
-  }
 
   function resetFlight() {
     setTaskId(null);
@@ -440,17 +459,21 @@ export default function Home() {
       }).catch(() => undefined);
     }
     setGithubConnectionId(null);
+    setGithubUsername(null);
+    setGithubStatus("not_connected");
     window.sessionStorage.removeItem("mvpilot_github_connection_id");
+    window.sessionStorage.removeItem("mvpilot_github_username");
+    window.sessionStorage.removeItem("mvpilot_github_connecting");
     setGithubMessage("GitHub disconnected for this browser session.");
   }
 
   async function checkGithubStatus(apiBaseUrl: string) {
-    if (!githubConnectionId) return { connected: false, username: null };
+    if (!githubConnectionId) return { connected: false, username: null, status: "missing" };
     const response = await fetch(`${apiBaseUrl}/api/auth/github/status?github_connection_id=${encodeURIComponent(githubConnectionId)}`, {
       cache: "no-store",
     });
-    if (!response.ok) return { connected: false, username: null };
-    return await response.json() as { connected: boolean; username?: string | null };
+    if (!response.ok) return { connected: false, username: null, status: "error" };
+    return await response.json() as { connected: boolean; username?: string | null; status?: string };
   }
 
   function addSource() {
@@ -488,12 +511,6 @@ export default function Home() {
       return;
     }
 
-    if (!primaryRulesUrl.trim()) {
-      setSubmitState("error");
-      setMessage("Add the primary rules URL before starting the run.");
-      return;
-    }
-
     if (repoPreference === "create_new_repo" && !requestedRepoName.trim()) {
       setSubmitState("error");
       setMessage("Add a repo name or choose an existing repository before launch.");
@@ -522,18 +539,22 @@ export default function Home() {
     const githubStatus = await checkGithubStatus(apiBaseUrl);
     if (!githubStatus.connected) {
       setSubmitState("error");
+      setGithubStatus("error");
       setGithubMessage("GitHub is not connected. Complete backend OAuth before launching repo actions.");
       setMessage("Connect GitHub before launch so the backend can create or update the repo without frontend tokens.");
       return;
     }
+    setGithubStatus("connected");
+    setGithubUsername(githubStatus.username || githubUsername);
     setGithubMessage(githubStatus.username ? `Connected as ${githubStatus.username}.` : "GitHub connection ready.");
 
     const formData = new FormData();
     formData.append("title", payloadPreview.title);
     formData.append("idea", idea);
-    formData.append("rulesUrl", primaryRulesUrl.trim());
+    if (primaryRulesUrl.trim()) formData.append("rulesUrl", primaryRulesUrl.trim());
     formData.append("repoPreference", repoPreference);
     formData.append("visibility", visibility);
+    if (repoDescription.trim()) formData.append("repoDescription", repoDescription.trim());
     if (repoPreference === "create_new_repo") formData.append("repoName", requestedRepoName.trim());
     if (repoPreference === "use_existing_repo") formData.append("repoUrl", existingRepoUrl.trim());
     formData.append("source", "mvpilot_frontend");
@@ -560,7 +581,9 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error(`Agent returned ${response.status}`);
+        const payload = await response.json().catch(() => ({}));
+        const detail = typeof payload.detail === "string" ? payload.detail : `Agent returned ${response.status}`;
+        throw new Error(detail);
       }
 
       const data = await response.json();
@@ -588,7 +611,7 @@ export default function Home() {
               MVPilot Flight Control
             </h1>
             <p className="mt-3 max-w-3xl text-base leading-7 text-[#b9cacb]">
-              File a build brief, connect GitHub, and fly the project through retrieval, scoping, repo synthesis, verification, and final delivery.
+              Connect GitHub, describe an MVP, create a repo, watch Nemotron/OpenClaw build it, then open the finished GitHub project.
             </p>
           </div>
           <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-4 backdrop-blur-xl">
@@ -622,41 +645,43 @@ export default function Home() {
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="idea">Project idea</label>
                   <textarea id="idea" value={idea} onChange={(event) => setIdea(event.target.value)} rows={4} className="mt-2 w-full resize-none rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
+                  <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="repo-description">Repo description</label>
+                  <input id="repo-description" type="text" value={repoDescription} onChange={(event) => setRepoDescription(event.target.value)} placeholder="Optional GitHub repository description" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
+
                   <section className="mt-5 rounded-lg border border-[#3a494b]/70 bg-[#1c1f29]/70 p-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">GitHub Link</p>
-                        <p className="mt-1 text-sm leading-5 text-[#b9cacb]">Backend owns OAuth and stores the token server-side. No GitHub secret is stored in the browser.</p>
+                        <p className="mt-1 text-sm leading-5 text-[#b9cacb]">Backend OAuth creates the session and stores the encrypted GitHub token server-side.</p>
                       </div>
                       {githubConnectionId ? (
                         <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={connectGitHub}
-                            disabled={githubOAuthConfig !== null && !oauthReady}
-                            title={oauthReady ? "Sign in with GitHub OAuth" : "OAuth is not configured in backend .env"}
-                            className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)] disabled:cursor-not-allowed disabled:bg-[#31353f] disabled:text-[#849495]"
-                          >
-                            Connect OAuth
-                          </button>
-                          {patReady ? (
-                            <button type="button" onClick={() => void connectGitHubWithEnvToken()} className="rounded border border-[#4edea3]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#4edea3] transition hover:bg-[#4edea3]/10">Use backend token</button>
-                          ) : null}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={connectGitHub}
+                          disabled={githubOAuthConfig !== null && !oauthReady}
+                          title={oauthReady ? "Sign in with GitHub OAuth" : "OAuth is not configured in backend .env"}
+                          className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)] disabled:cursor-not-allowed disabled:bg-[#31353f] disabled:text-[#849495]"
+                        >
+                          {githubStatus === "error" ? "Retry GitHub" : "Connect GitHub"}
+                        </button>
                       )}
                     </div>
                     {githubOAuthConfig && !oauthReady ? (
                       <p className="mt-3 rounded border border-[#ffb4ab]/40 bg-[#93000a]/20 px-3 py-2 text-xs leading-5 text-[#ffb4ab]">
-                        OAuth is not set up on the backend. Use <strong>Use backend token</strong> instead, or add{" "}
+                        OAuth is not set up on the backend. Add{" "}
                         {(githubOAuthConfig.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"]).join(", ")} to .env and register{" "}
                         <span className="font-mono">{githubOAuthConfig.redirectUri}</span> in a GitHub OAuth app.
                       </p>
                     ) : null}
                     <div className={`mt-3 flex items-start justify-between gap-3 rounded border bg-[#0a0e17] px-3 py-2 ${githubMessage.toLowerCase().includes("not configured") ? "border-[#ffb4ab]/40" : "border-[#3a494b]"}`}>
-                      <p className={`text-sm leading-6 ${githubMessage.toLowerCase().includes("not configured") ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{githubMessage}</p>
-                      <StatusPill status={githubConnectionId ? "Complete" : "Ready"} />
+                      <div>
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#849495]">{githubStatusLabel(githubStatus)}</p>
+                        <p className={`mt-1 text-sm leading-6 ${githubStatus === "error" ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{githubMessage}</p>
+                        {githubUsername && <p className="mt-1 font-mono text-xs text-[#4edea3]">@{githubUsername}</p>}
+                      </div>
+                      <StatusPill status={githubStatusPill(githubStatus)} />
                     </div>
                   </section>
 
@@ -692,8 +717,8 @@ export default function Home() {
                     )}
                   </section>
 
-                  <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="primary-rules-url">Primary rules URL</label>
-                  <input id="primary-rules-url" type="url" required value={primaryRulesUrl} onChange={(event) => setPrimaryRulesUrl(event.target.value)} placeholder="https://example.com/hackathon-rules" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
+                  <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="primary-rules-url">Optional reference URL</label>
+                  <input id="primary-rules-url" type="url" value={primaryRulesUrl} onChange={(event) => setPrimaryRulesUrl(event.target.value)} placeholder="https://example.com/product-docs-or-rules" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
                   <div className="mt-5 rounded-lg border border-[#3a494b]/70 bg-[#1c1f29]/70 p-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -805,6 +830,29 @@ export default function Home() {
                 </div>
 
                 <div className="grid gap-5 lg:grid-cols-3">
+                  <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] lg:col-span-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Agent Activity Log</p>
+                        <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{activityLog.length ? `${activityLog.length} events recorded` : "Waiting for first event"}</h3>
+                      </div>
+                      <p className="font-mono text-xs uppercase tracking-widest text-[#849495]">Live build timeline</p>
+                    </div>
+                    <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto">
+                      {activityLog.map((event, index) => (
+                        <div key={`${event.node_name}-${index}`} className="grid gap-3 rounded border border-[#3a494b] bg-[#0a0e17] p-3 md:grid-cols-[170px_1fr_auto] md:items-center">
+                          <div>
+                            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#4edea3]">{event.agent || "agent"}</p>
+                            <p className="mt-1 font-mono text-xs text-[#849495]">{event.node_name}</p>
+                          </div>
+                          <p className="text-sm leading-6 text-[#b9cacb]">{event.message}</p>
+                          <StatusPill status={event.status === "failed" ? "Failed" : event.status === "completed" || event.status === "success" ? "Complete" : "Running"} />
+                        </div>
+                      ))}
+                      {!activityLog.length && <p className="rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 text-xs text-[#849495]">No agent events yet.</p>}
+                    </div>
+                  </div>
+
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Radar Evidence</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{ragEvidence.length ? `${ragEvidence.length} chunks retrieved` : "Waiting for context"}</h3>
@@ -889,7 +937,7 @@ export default function Home() {
             <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Person 1 Handoff</p>
             <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Orchestrator contract</h2>
             <div className="mt-3 space-y-2 text-sm leading-6 text-[#b9cacb]">
-              <p>POST /api/orchestrator/start-project receives idea, rulesUrl, referenceUrls, repoPreference, repoName, repoUrl, and visibility.</p>
+            <p>POST /api/orchestrator/start-project receives idea, optional references, repoPreference, repoName, repoDescription, repoUrl, and visibility.</p>
               <p>Backend returns task_id, then GET /agent/tasks/:id streams RAG evidence, tool calls, build logs, and final GitHub links.</p>
             </div>
           </div>

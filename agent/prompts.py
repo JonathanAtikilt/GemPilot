@@ -89,10 +89,12 @@ def build_file_manifest_prompt(
         f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
         f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Repo plan:\n{_json_block(repo_plan)}\n\n"
-        "Return artifact names, kinds, summaries, optional content, mode, and "
-        "decision trace. The manifest must include README.md, docs/ARCHITECTURE.md, "
-        "docs/BUILD_LOG.md (or logs/build_log.md), demo/demo_script.md, "
-        "requirements.txt or package.json, and at least one file under src/ or backend/."
+        "Return artifact names, kinds, summaries, full text content, mode, and "
+        "decision trace. Generate a real runnable MVP repository, not placeholder files. "
+        "Include frontend files, backend/API files, database schema notes when persistence is useful, "
+        "tests, README.md, docs/ARCHITECTURE.md, docs/IMPLEMENTATION_PLAN.md, "
+        "docs/BUILD_LOG.md, demo/demo_script.md, package.json and/or requirements.txt, "
+        "and at least one file under src/ or backend/. Do not include secrets or a real .env file."
     )
 
 

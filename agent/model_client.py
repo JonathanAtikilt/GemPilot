@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from agent.config import Settings
+from agent.generated_project import build_project_artifacts
 from agent.model_outputs import (
     BlockerAnalysisOutput,
     DemoScriptOutput,
@@ -611,15 +612,12 @@ def _project_title(idea: str, prompt: str) -> str:
 
 
 def _source_warning_summary(prompt: str) -> str:
-    source_context = _extract_source_context(prompt)
-    warnings = source_context.get("warnings")
-    if not isinstance(warnings, list) or not warnings:
+    warnings = _source_warnings(prompt)
+    if not warnings:
         return ""
 
     messages = []
     for warning in warnings:
-        if not isinstance(warning, dict):
-            continue
         source = warning.get("source", "source")
         message = warning.get("message", "unreadable source")
         messages.append(f"{source}: {message}")
@@ -627,6 +625,22 @@ def _source_warning_summary(prompt: str) -> str:
     if not messages:
         return ""
     return "Source warnings: " + "; ".join(messages)
+
+
+def _source_warnings(prompt: str) -> list[dict[str, str]]:
+    source_context = _extract_source_context(prompt)
+    warnings = source_context.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return []
+
+    parsed: list[dict[str, str]] = []
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            continue
+        source = warning.get("source", "source")
+        message = warning.get("message", "unreadable source")
+        parsed.append({"source": str(source), "message": str(message)})
+    return parsed
 
 
 def _file_manifest_payload(
@@ -638,128 +652,25 @@ def _file_manifest_payload(
     title = _project_title(idea, prompt)
     resolved_stack = _extract_resolved_stack_summary(prompt)
     warning_summary = _source_warning_summary(prompt)
-    warning_note = f"\n\n{warning_summary}" if warning_summary else ""
+    source_warnings = _source_warnings(prompt)
+    repo_plan = _extract_json_section(prompt, "Repo plan:\n")
+    artifacts = build_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        repo_plan=repo_plan,
+        source_warnings=source_warnings,
+    )
     return FileManifestOutput(
-        artifacts=[
-            {
-                "name": "README.md",
-                "kind": "markdown",
-                "summary": "Generated setup and MVP overview.",
-                "content": (
-                    f"# {title}\n\nGenerated demo package for: {idea}\n\n"
-                    f"Resolved stack: {resolved_stack}.\n\n"
-                    "## What This MVP Does\n\n"
-                    "- Accepts a project idea.\n"
-                    "- Retrieves build context before planning.\n"
-                    "- Generates a small repo package and records the outcome.\n\n"
-                    "## Run\n\n"
-                    "```bash\n"
-                    "pip install -r requirements.txt\n"
-                    "python -m src.app\n"
-                    "```\n"
-                    f"{warning_note}"
-                ),
-            },
-            {
-                "name": "requirements.txt",
-                "kind": "text",
-                "summary": "Generated Python dependencies for install and health checks.",
-                "content": "fastapi\nuvicorn\npytest\n",
-            },
-            {
-                "name": "src/app.py",
-                "kind": "python",
-                "summary": "Generated minimal Python entrypoint.",
-                "content": (
-                    '"""Generated MVP entrypoint."""\n\n'
-                    "from src.core.agent import build_summary\n\n\n"
-                    "def main() -> None:\n"
-                    f"    print(build_summary({json.dumps(title)}, {json.dumps(idea)}))\n\n\n"
-                    'if __name__ == "__main__":\n'
-                    "    main()\n"
-                ),
-            },
-            {
-                "name": "src/core/agent.py",
-                "kind": "python",
-                "summary": "Generated minimal agent core.",
-                "content": (
-                    '"""Tiny generated agent core for the hackathon MVP package."""\n\n\n'
-                    "def build_summary(title: str, idea: str) -> str:\n"
-                    "    return f\"{title}: scoped demo package for {idea}\"\n"
-                ),
-            },
-            {
-                "name": "tests/test_app.py",
-                "kind": "python",
-                "summary": "Generated smoke test for the agent core.",
-                "content": (
-                    "from src.core.agent import build_summary\n\n\n"
-                    "def test_build_summary_contains_title_and_idea():\n"
-                    "    output = build_summary('Demo', 'ship an MVP')\n"
-                    "    assert 'Demo' in output\n"
-                    "    assert 'ship an MVP' in output\n"
-                ),
-            },
-            {
-                "name": "docs/ARCHITECTURE.md",
-                "kind": "markdown",
-                "summary": "Generated architecture notes grounded in the plan.",
-                "content": (
-                    "# Architecture\n\n"
-                    f"Project: {title}\n\n"
-                    "## Stack\n\n"
-                    f"{resolved_stack}\n\n"
-                    "## Agent Flow\n\n"
-                    "Frontend submits the idea, the orchestrator retrieves RAG context, "
-                    "Nemotron planning generates the package, GitHub commits files, "
-                    "and Black Box memory stores the result."
-                    f"{warning_note}"
-                ),
-            },
-            {
-                "name": "docs/BUILD_LOG.md",
-                "kind": "markdown",
-                "summary": "Generated build log stub for Black Box indexing.",
-                "content": (
-                    "# Build Log\n\n"
-                    "- Preflight complete.\n"
-                    "- RAG context retrieved before planning.\n"
-                    "- Repository package generated by MVPilot.\n"
-                ),
-            },
-            {
-                "name": "demo/demo_script.md",
-                "kind": "markdown",
-                "summary": "Generated a three-minute demo script.",
-                "content": (
-                    "# Demo Script\n\n"
-                    f"Show {title}: {idea}.\n\n"
-                    "1. Launch from the frontend.\n"
-                    "2. Show Radar Scan evidence.\n"
-                    "3. Show Flight Plan and GitHub commit links.\n"
-                    f"{warning_note}"
-                ),
-            },
-            {
-                "name": ".env.example",
-                "kind": "text",
-                "summary": "Generated placeholder environment file.",
-                "content": (
-                    "NVIDIA_API_KEY=\n"
-                    "SUPABASE_URL=\n"
-                    "SUPABASE_SERVICE_ROLE_KEY=\n"
-                    "GITHUB_TOKEN=\n"
-                ),
-            },
-        ],
+        artifacts=artifacts,
         mode=mode,
         decision_trace=_trace(
             mode,
             fallback_reason,
             [
-                f"Mapped {title} into README, app, docs, tests, demo, and env placeholder artifacts.",
+                f"Mapped {title} into runnable frontend, backend, database, tests, docs, and demo artifacts.",
                 f"Used resolved stack summary: {resolved_stack}.",
+                warning_summary or "No submitted source warnings were present.",
                 "Kept artifact content compact, commit-safe, and health-checkable.",
             ],
         ),

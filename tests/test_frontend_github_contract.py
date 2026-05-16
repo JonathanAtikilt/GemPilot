@@ -9,14 +9,17 @@ def test_frontend_uses_backend_owned_github_oauth_flow():
 
     assert "/api/auth/github/login" in source
     assert "/api/auth/github/config" in source
-    assert "/api/auth/github/use-env-token" in source
     assert "/api/auth/github/status" in source
     assert "/api/orchestrator/start-project" in source
     assert "rulesUrl" in source
     assert "referenceUrls" in source
     assert "repoPreference" in source
+    assert "repoDescription" in source
     assert "github_connection_id" in source
+    assert "Agent Activity Log" in source
     assert "githubToken" not in source
     assert "github_auth_code" not in source
+    assert "GITHUB_TOKEN" not in source
+    assert "Use backend token" not in source
     assert "NEXT_PUBLIC_GITHUB_CLIENT_ID" not in source
     assert "https://github.com/login/oauth/authorize" not in source
