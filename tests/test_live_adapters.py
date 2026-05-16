@@ -31,30 +31,90 @@ def test_live_tool_adapter():
     adapter = LiveToolAdapter()
     
     with patch("agent.live_adapters.create_repo") as mock_create_repo:
-        mock_create_repo.return_value = {"status": "success"}
+        mock_create_repo.return_value = {
+            "tool_name": "github.create_repo",
+            "status": "success",
+            "verification_status": "verified",
+            "output": {
+                "repo_name": "mvpilot-generated-task_123",
+                "repo_url": "https://github.com/test/mvpilot-generated-task_123",
+                "visibility": "public",
+            },
+            "error": None,
+        }
         res = adapter.create_repo("task_12345678", "public")
-        assert res == {"status": "success"}
-        mock_create_repo.assert_called_with(repo_name="mvpilot-demo-task_123", description="Generated MVP", visibility="public")
+        assert res["status"] == "success"
+        assert res["tool"] == "github.create_repo"
+        assert res["repo"]["name"] == "mvpilot-generated-task_123"
+        assert res["repo"]["url"] == "https://github.com/test/mvpilot-generated-task_123"
+        assert res["raw_result"]["tool_name"] == "github.create_repo"
+        mock_create_repo.assert_called_with(repo_name="mvpilot-generated-task_123", description="Generated MVP", visibility="public")
 
     with patch("agent.live_adapters.commit_files") as mock_commit:
-        mock_commit.return_value = {"status": "success"}
+        mock_commit.return_value = {
+            "tool_name": "github.commit_files",
+            "status": "success",
+            "verification_status": "verified",
+            "output": {
+                "commit_sha": "abc123",
+                "changed_files": ["a.txt"],
+            },
+            "error": None,
+        }
         res = adapter.commit_files("repo", [{"path": "a.txt", "content": "x"}], "msg")
-        assert res == {"status": "success"}
+        assert res["status"] == "success"
+        assert res["commit_sha"] == "abc123"
+        assert res["files"] == ["a.txt"]
+        assert res["raw_result"]["tool_name"] == "github.commit_files"
 
     with patch("agent.live_adapters.check_repo_health") as mock_check:
-        mock_check.return_value = {"status": "success"}
+        mock_check.return_value = {
+            "tool_name": "github.check_repo_health",
+            "status": "success",
+            "verification_status": "verified",
+            "output": {"healthy": True, "missing": []},
+            "error": None,
+        }
         res = adapter.check_repo_health("repo")
-        assert res == {"status": "success"}
+        assert res["status"] == "success"
+        assert res["healthy"] is True
+        assert res["raw_result"]["tool_name"] == "github.check_repo_health"
 
     with patch("agent.live_adapters.detect_blocker") as mock_detect:
-        mock_detect.return_value = {"status": "success"}
+        mock_detect.return_value = {
+            "tool_name": "build.detect_blocker",
+            "status": "success",
+            "verification_status": "not_checked",
+            "output": {
+                "has_blocker": True,
+                "blocker_type": "route_mismatch",
+                "summary": "Route mismatch detected.",
+                "recommended_fix": "Update frontend route.",
+            },
+            "error": None,
+        }
         res = adapter.detect_blocker([{}])
-        assert res == {"status": "success"}
+        assert res["status"] == "success"
+        assert res["recoverable"] is True
+        assert res["blocker_type"] == "route_mismatch"
+        assert res["raw_result"]["tool_name"] == "build.detect_blocker"
 
     with patch("agent.live_adapters.verify_commit") as mock_verify:
-        mock_verify.return_value = {"status": "success"}
+        mock_verify.return_value = {
+            "tool_name": "github.verify_commit",
+            "status": "success",
+            "verification_status": "verified",
+            "output": {
+                "commit_sha": "sha",
+                "files_changed": ["a.txt"],
+            },
+            "error": None,
+        }
         res = adapter.verify_commit("repo", "sha")
-        assert res == {"status": "success"}
+        assert res["status"] == "success"
+        assert res["verification_status"] == "verified"
+        assert res["files_changed"] == ["a.txt"]
+        assert res["raw_result"]["tool_name"] == "github.verify_commit"
         
     assert adapter.verify_build(recovered=False)["status"] == "failed"
     assert adapter.verify_build(recovered=True)["status"] == "success"
