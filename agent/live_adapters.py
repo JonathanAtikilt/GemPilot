@@ -11,6 +11,7 @@ from tools.github_tool import create_repo, commit_files
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
 from tools.verifier import verify_commit
+from tools.tool_logger import log_audit_event, log_generated_artifact, log_tool_call
 
 
 class LiveRagMemoryAdapter:
@@ -208,6 +209,16 @@ class LiveAuditAdapter:
         self._model_name = model_name
 
     def write_audit_log(self, node_name: str, message: str, decision_trace: list[str], status: str = "completed") -> AgentStep:
+        log_audit_event(
+            task_id=None,
+            step=node_name,
+            message=message,
+            data={
+                "status": status,
+                "model": self._model_name,
+                "decision_trace": decision_trace,
+            },
+        )
         return AgentStep(
             node_name=node_name,
             status=status,
@@ -218,10 +229,23 @@ class LiveAuditAdapter:
         )
 
     def write_tool_call(self, tool_name: str, args: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-        return {"tool_name": tool_name, "args": args, "result": result}
+        log_result = log_tool_call(
+            task_id=None,
+            tool_name=tool_name,
+            input_json=args,
+            result=result,
+        )
+        return {"tool_name": tool_name, "args": args, "result": result, "log_result": log_result}
 
     def write_artifact(self, name: str, kind: str, content: Any) -> dict[str, Any]:
-        return {"name": name, "kind": kind, "content": content}
+        log_result = log_generated_artifact(
+            task_id=None,
+            artifact_type=kind,
+            path=name,
+            content=content if isinstance(content, str) else str(content),
+            commit_sha=None,
+        )
+        return {"name": name, "kind": kind, "content": content, "log_result": log_result}
 
 
 def _workflow_status(raw_result: dict[str, Any]) -> str:

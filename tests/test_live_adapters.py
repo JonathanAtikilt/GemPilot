@@ -188,14 +188,38 @@ def test_live_tool_adapter():
 def test_live_audit_adapter():
     adapter = LiveAuditAdapter(model_name="test-model")
     
-    step = adapter.write_audit_log("node", "msg", ["trace"], "status")
-    assert step.node_name == "node"
-    assert step.message == "msg"
-    assert step.model == "test-model"
-    assert "Live mode: running live audit trace." in step.decision_trace
+    with patch("agent.live_adapters.log_audit_event") as mock_log_audit:
+        mock_log_audit.return_value = {"status": "success", "output": {"logged": False}}
+        step = adapter.write_audit_log("node", "msg", ["trace"], "status")
+        assert step.node_name == "node"
+        assert step.message == "msg"
+        assert step.model == "test-model"
+        assert "Live mode: running live audit trace." in step.decision_trace
+        mock_log_audit.assert_called_once()
+        assert mock_log_audit.call_args.kwargs["step"] == "node"
+        assert mock_log_audit.call_args.kwargs["data"]["decision_trace"] == ["trace"]
 
-    res = adapter.write_tool_call("tool", {}, {})
-    assert res["tool_name"] == "tool"
+    with patch("agent.live_adapters.log_tool_call") as mock_log_tool:
+        mock_log_tool.return_value = {"status": "success", "output": {"logged": False}}
+        res = adapter.write_tool_call("tool", {"arg": "value"}, {"status": "success"})
+        assert res["tool_name"] == "tool"
+        assert res["log_result"]["status"] == "success"
+        mock_log_tool.assert_called_once_with(
+            task_id=None,
+            tool_name="tool",
+            input_json={"arg": "value"},
+            result={"status": "success"},
+        )
 
-    res = adapter.write_artifact("name", "json", {})
-    assert res["name"] == "name"
+    with patch("agent.live_adapters.log_generated_artifact") as mock_log_artifact:
+        mock_log_artifact.return_value = {"status": "success", "output": {"logged": False}}
+        res = adapter.write_artifact("name", "json", {})
+        assert res["name"] == "name"
+        assert res["log_result"]["status"] == "success"
+        mock_log_artifact.assert_called_once_with(
+            task_id=None,
+            artifact_type="json",
+            path="name",
+            content="{}",
+            commit_sha=None,
+        )
