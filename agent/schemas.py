@@ -4,7 +4,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from agent.rag.url_utils import collect_source_urls
 
 
 class TaskStatus(str, Enum):
@@ -18,6 +20,10 @@ class RunAgentRequest(BaseModel):
     idea: str = Field(min_length=1)
     repo_visibility: Literal["public", "private"]
     demo_mode: bool = False
+    primary_rules_url: str | None = None
+    rules_url: str | None = None
+    additional_urls: list[str] = Field(default_factory=list)
+    source_urls: list[str] = Field(default_factory=list)
 
     @field_validator("idea", mode="before")
     @classmethod
@@ -25,6 +31,31 @@ class RunAgentRequest(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+    @field_validator("additional_urls", mode="before")
+    @classmethod
+    def coerce_additional_urls(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped] if stripped else []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
+    @model_validator(mode="after")
+    def merge_source_urls(self) -> RunAgentRequest:
+        merged = collect_source_urls(
+            source_urls=self.source_urls,
+            primary_rules_url=self.primary_rules_url,
+            rules_url=self.rules_url,
+            additional_urls=self.additional_urls,
+        )
+        self.source_urls = merged
+        if merged and not self.primary_rules_url:
+            self.primary_rules_url = merged[0]
+        return self
 
 
 class RunAgentResponse(BaseModel):
@@ -39,6 +70,7 @@ class TaskRecord(BaseModel):
     idea: str
     repo_visibility: Literal["public", "private"]
     demo_mode: bool
+    source_urls: list[str] = Field(default_factory=list)
     status: TaskStatus
     created_at: datetime
     updated_at: datetime

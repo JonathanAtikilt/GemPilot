@@ -14,6 +14,17 @@ from tools.verifier import verify_commit
 
 
 class LiveRagMemoryAdapter:
+    async def index_source_urls(self, urls: list[str]) -> dict[str, Any]:
+        from agent.rag.ingest import ingest_source_urls
+
+        result = await ingest_source_urls(urls)
+        return {
+            "urls": urls,
+            "documentsLoaded": result.documentsLoaded,
+            "chunksCreated": result.chunksCreated,
+            "storedIn": result.storedIn,
+        }
+
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
         results = await search_rag(query=idea, top_k=5, doc_types=["hackathon_rules"])
         return [r.model_dump() for r in results]

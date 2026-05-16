@@ -132,6 +132,7 @@ class SourcesResponse(BaseModel):
 class BuildContextOptionalParams(BaseModel):
     stack: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
+    sourceUrls: list[str] = Field(default_factory=list)
     repoPreference: str | None = None
     demoPreference: str | None = None
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from agent.schemas import AgentStep
 
 class RagMemoryAdapter(Protocol):
+    async def index_source_urls(self, urls: list[str]) -> dict[str, Any]: ...
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]: ...
@@ -39,6 +40,9 @@ class InMemoryRagMemoryAdapter:
         from agent.live_adapters import LiveRagMemoryAdapter
 
         self._live = LiveRagMemoryAdapter()
+
+    async def index_source_urls(self, urls: list[str]) -> dict[str, Any]:
+        return await self._live.index_source_urls(urls)
 
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
         return await self._live.retrieve_hackathon_context(idea)

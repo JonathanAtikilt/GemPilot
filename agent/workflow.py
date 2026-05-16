@@ -44,6 +44,7 @@ class WorkflowState(TypedDict):
     idea: str
     repo_visibility: Literal["public", "private"]
     demo_mode: bool
+    source_urls: NotRequired[list[str]]
     status: str
     nemotron_model: str
     mock_mode: bool
@@ -76,12 +77,14 @@ def build_initial_state(
     repo_visibility: Literal["public", "private"],
     demo_mode: bool,
     settings: Settings,
+    source_urls: list[str] | None = None,
 ) -> WorkflowState:
     return {
         "task_id": task_id,
         "idea": idea,
         "repo_visibility": repo_visibility,
         "demo_mode": demo_mode,
+        "source_urls": list(source_urls or []),
         "status": "started",
         "nemotron_model": settings.nemotron_model,
         "mock_mode": settings.mock_mode,
@@ -162,9 +165,19 @@ def build_workflow(
         )
 
     async def retrieve_context(state: WorkflowState) -> dict[str, Any]:
+        source_urls = list(state.get("source_urls") or [])
+        index_summary: dict[str, Any] = {
+            "documentsLoaded": 0,
+            "chunksCreated": 0,
+        }
+        if source_urls:
+            index_summary = await active_retrieval.index_source_urls(source_urls)
+
+        optional_params = {"sourceUrls": source_urls} if source_urls else None
         build_context = await active_retrieval.retrieve_build_context(
             state["task_id"],
             state["idea"],
+            optional_params=optional_params,
             top_k=8,
         )
         docs = (
@@ -194,6 +207,12 @@ def build_workflow(
                 message="Retrieved structured RAG build context for the orchestrator.",
                 decision_trace=[
                     f"Loaded build context via RAG adapter (mode={context_mode}).",
+                    (
+                        f"Indexed {index_summary.get('documentsLoaded', 0)} orchestrator URL document(s) "
+                        f"({index_summary.get('chunksCreated', 0)} chunks) before retrieval."
+                        if source_urls
+                        else "No orchestrator source URLs to index (using ingested corpus and RAG_SCRAPE_URLS only)."
+                    ),
                     f"Structured constraints: {len(build_context.get('requiredDeliverables', []))} deliverables, "
                     f"{len(build_context.get('requiredTechStackPieces', []))} stack items, "
                     f"{critical_count} critical priorities, {evidence_count} evidence chunks.",
