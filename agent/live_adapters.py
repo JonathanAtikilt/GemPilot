@@ -30,23 +30,105 @@ class LiveRagMemoryAdapter:
 
 class LiveToolAdapter:
     def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]:
-        return create_repo(
-            repo_name=f"mvpilot-demo-{task_id[:8]}",
+        raw_result = create_repo(
+            repo_name=f"mvpilot-generated-{task_id[:8]}",
             description="Generated MVP",
             visibility=visibility
         )
+        output = raw_result.get("output", {})
+        return {
+            "tool": raw_result.get("tool_name", "github.create_repo"),
+            "status": _workflow_status(raw_result),
+            "mock_mode": raw_result.get("status") == "mock",
+            "recoverable": _is_recoverable(raw_result),
+            "repo": {
+                "name": output.get("repo_name"),
+                "visibility": output.get("visibility", visibility),
+                "url": output.get("repo_url"),
+            },
+            "summary": _summary(
+                raw_result,
+                success="Created and verified GitHub repository.",
+                failure="Failed to create GitHub repository.",
+            ),
+            "raw_result": raw_result,
+        }
 
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]:
-        return commit_files(repo_name=repo_name, files=files, message=message)
+        raw_result = commit_files(repo_name=repo_name, files=files, message=message)
+        output = raw_result.get("output", {})
+        return {
+            "tool": raw_result.get("tool_name", "github.commit_files"),
+            "status": _workflow_status(raw_result),
+            "mock_mode": raw_result.get("status") == "mock",
+            "recoverable": _is_recoverable(raw_result),
+            "repo": repo_name,
+            "files": output.get("changed_files") or [file.get("path") for file in files],
+            "commit_sha": output.get("commit_sha"),
+            "summary": _summary(
+                raw_result,
+                success="Committed generated files and verified commit.",
+                failure="Failed to commit generated files.",
+            ),
+            "raw_result": raw_result,
+        }
 
     def check_repo_health(self, repo_name: str) -> dict[str, Any]:
-        return check_repo_health(repo_name)
+        raw_result = check_repo_health(repo_name)
+        output = raw_result.get("output", {})
+        return {
+            "tool": raw_result.get("tool_name", "github.check_repo_health"),
+            "status": _workflow_status(raw_result),
+            "mock_mode": raw_result.get("status") == "mock",
+            "recoverable": _is_recoverable(raw_result),
+            "healthy": output.get("healthy", raw_result.get("status") in {"success", "mock"}),
+            "missing": output.get("missing", []),
+            "summary": _summary(
+                raw_result,
+                success="Checked generated repository health.",
+                failure="Generated repository health check failed.",
+            ),
+            "raw_result": raw_result,
+        }
 
     def detect_blocker(self, logs: list[dict[str, Any]]) -> dict[str, Any]:
-        return detect_blocker(logs)
+        raw_result = detect_blocker(logs)
+        output = raw_result.get("output", raw_result)
+        return {
+            "tool": raw_result.get("tool_name", "build.detect_blocker"),
+            "status": _workflow_status(raw_result),
+            "mock_mode": raw_result.get("status") == "mock",
+            "recoverable": bool(output.get("has_blocker")),
+            "has_blocker": output.get("has_blocker", False),
+            "blocker_type": output.get("blocker_type"),
+            "summary": output.get("summary") or _summary(
+                raw_result,
+                success="Analyzed logs for blockers.",
+                failure="Failed to analyze logs for blockers.",
+            ),
+            "recommended_fix": output.get("recommended_fix"),
+            "raw_result": raw_result,
+        }
 
     def verify_commit(self, repo_name: str, commit_sha: str) -> dict[str, Any]:
-        return verify_commit(repo_name, commit_sha)
+        raw_result = verify_commit(repo_name, commit_sha)
+        output = raw_result.get("output", {})
+        return {
+            "tool": raw_result.get("tool_name", "github.verify_commit"),
+            "status": _workflow_status(raw_result),
+            "mock_mode": raw_result.get("status") == "mock",
+            "recoverable": _is_recoverable(raw_result),
+            "repo": repo_name,
+            "commit_sha": output.get("commit_sha", commit_sha),
+            "files_changed": output.get("files_changed", []),
+            "verification_status": raw_result.get("verification_status"),
+            "summary": _summary(
+                raw_result,
+                success="Verified GitHub commit.",
+                failure="Failed to verify GitHub commit.",
+            ),
+            "raw_result": raw_result,
+        }
 
     def verify_build(self, recovered: bool) -> dict[str, Any]:
         # Return mock shape or call live build verify if it exists
@@ -95,3 +177,22 @@ class LiveAuditAdapter:
 
     def write_artifact(self, name: str, kind: str, content: Any) -> dict[str, Any]:
         return {"name": name, "kind": kind, "content": content}
+
+
+def _workflow_status(raw_result: dict[str, Any]) -> str:
+    if raw_result.get("status") in {"success", "mock"}:
+        return "success"
+    return "failed"
+
+
+def _is_recoverable(raw_result: dict[str, Any]) -> bool:
+    status = raw_result.get("status")
+    if status == "refused":
+        return False
+    return status == "failed"
+
+
+def _summary(raw_result: dict[str, Any], *, success: str, failure: str) -> str:
+    if raw_result.get("status") in {"success", "mock"}:
+        return success
+    return raw_result.get("error") or failure
