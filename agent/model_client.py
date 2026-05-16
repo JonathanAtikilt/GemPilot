@@ -437,14 +437,18 @@ def _deterministic_payload(
     idea = _extract_idea(prompt)
     if purpose == "plan_repo":
         return _repo_plan_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "file_manifest":
+        return _file_manifest_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "final_readme":
+        return _final_readme_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "demo_script":
+        return _demo_script_payload(mode, fallback_reason, idea, prompt)
+    if purpose == "pitch":
+        return _pitch_payload(mode, fallback_reason, idea, prompt)
 
     payloads = {
         "scope_mvp": _scope_payload,
-        "file_manifest": _file_manifest_payload,
         "blocker_analysis": _blocker_analysis_payload,
-        "final_readme": _final_readme_payload,
-        "demo_script": _demo_script_payload,
-        "pitch": _pitch_payload,
     }
     try:
         return payloads[purpose](mode, fallback_reason, idea)
@@ -482,14 +486,18 @@ def _repo_plan_payload(
     prompt: str,
 ) -> dict:
     label = _idea_label(idea)
+    title = _project_title(idea, prompt)
     resolved_stack = _extract_resolved_stack_summary(prompt)
+    warning_summary = _source_warning_summary(prompt)
     return RepoPlanOutput(
         files=["README.md", "demo_script.md", "pitch.md"],
         test_plan=["unit workflow", "API integration", "mock build verify"],
         architecture_notes=[
+            f"Use submitted title as project identity: {title}.",
             f"Use resolvedTechStack for generated files, tests, and architecture: {resolved_stack}.",
             "Keep model calls behind a client protocol.",
             "Keep GitHub and build actions behind mockable tool adapters.",
+            warning_summary or "No submitted source warnings were present.",
         ],
         mode=mode,
         decision_trace=_trace(
@@ -526,27 +534,85 @@ def _extract_resolved_stack_summary(prompt: str) -> str:
     return ", ".join(stack_items)
 
 
-def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
-    title = _idea_title(idea)
+def _extract_json_section(prompt: str, marker: str) -> dict:
+    if marker not in prompt:
+        return {}
+
+    raw_block = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+    try:
+        payload = json.loads(raw_block)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_frontend_intake(prompt: str) -> dict:
+    return _extract_json_section(prompt, "Frontend intake:\n")
+
+
+def _extract_source_context(prompt: str) -> dict:
+    return _extract_json_section(prompt, "Source context:\n")
+
+
+def _project_title(idea: str, prompt: str) -> str:
+    intake = _extract_frontend_intake(prompt)
+    title = intake.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    return _idea_title(idea)
+
+
+def _source_warning_summary(prompt: str) -> str:
+    source_context = _extract_source_context(prompt)
+    warnings = source_context.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return ""
+
+    messages = []
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            continue
+        source = warning.get("source", "source")
+        message = warning.get("message", "unreadable source")
+        messages.append(f"{source}: {message}")
+
+    if not messages:
+        return ""
+    return "Source warnings: " + "; ".join(messages)
+
+
+def _file_manifest_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
+    title = _project_title(idea, prompt)
+    resolved_stack = _extract_resolved_stack_summary(prompt)
+    warning_summary = _source_warning_summary(prompt)
+    warning_note = f"\n\n{warning_summary}" if warning_summary else ""
     return FileManifestOutput(
         artifacts=[
             {
                 "name": "README.md",
                 "kind": "markdown",
                 "summary": "Generated setup and MVP overview.",
-                "content": f"# {title}\n\nGenerated demo package for: {idea}",
+                "content": (
+                    f"# {title}\n\nGenerated demo package for: {idea}\n\n"
+                    f"Resolved stack: {resolved_stack}.{warning_note}"
+                ),
             },
             {
                 "name": "demo_script.md",
                 "kind": "markdown",
                 "summary": "Generated a three-minute demo script.",
-                "content": f"# Demo Script\n\nShow the idea intake for: {idea}",
+                "content": f"# Demo Script\n\nShow {title}: {idea}.{warning_note}",
             },
             {
                 "name": "pitch.md",
                 "kind": "markdown",
                 "summary": "Generated a concise hackathon pitch.",
-                "content": f"# Pitch\n\nMVPilot turns this idea into a demo package: {idea}",
+                "content": f"# Pitch\n\nMVPilot turns {title} into a demo package: {idea}",
             },
         ],
         mode=mode,
@@ -554,7 +620,8 @@ def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None, idea: s
             mode,
             fallback_reason,
             [
-                "Mapped the repo plan into README, script, and pitch artifacts.",
+                f"Mapped {title} into README, script, and pitch artifacts.",
+                f"Used resolved stack summary: {resolved_stack}.",
                 "Kept artifact content compact so dashboard traces stay readable.",
             ],
         ),
@@ -589,15 +656,25 @@ def _blocker_analysis_payload(mode: ModelMode, fallback_reason: str | None, idea
     ).model_dump()
 
 
-def _final_readme_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
-    title = _idea_title(idea)
+def _final_readme_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
+    title = _project_title(idea, prompt)
+    resolved_stack = _extract_resolved_stack_summary(prompt)
+    warning_summary = _source_warning_summary(prompt)
+    warning_note = f"\n\n{warning_summary}" if warning_summary else ""
     return FinalReadmeOutput(
         title=title,
         content=(
             f"# {title}\n\n"
             f"MVPilot turned this submitted idea into a small demo package: {idea}\n\n"
+            f"Resolved stack: {resolved_stack}.\n\n"
             "The package includes scoped requirements, generated artifacts, build "
             "verification, blocker recovery, and a judge-ready final summary."
+            f"{warning_note}"
         ),
         setup_steps=[
             "Install dependencies.",
@@ -608,15 +685,23 @@ def _final_readme_payload(mode: ModelMode, fallback_reason: str | None, idea: st
             mode,
             fallback_reason,
             [
-                "Summarized the workflow around the submitted idea.",
+                f"Summarized the workflow around {title}.",
+                f"Included resolved stack summary: {resolved_stack}.",
                 "Included setup steps that work without live external services.",
             ],
         ),
     ).model_dump()
 
 
-def _demo_script_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
-    title = _idea_title(idea)
+def _demo_script_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
+    title = _project_title(idea, prompt)
+    warning_summary = _source_warning_summary(prompt)
+    warning_note = f" Mention source warnings: {warning_summary}." if warning_summary else ""
     return DemoScriptOutput(
         title=f"Three-minute {title} demo",
         content=(
@@ -624,6 +709,7 @@ def _demo_script_payload(mode: ModelMode, fallback_reason: str | None, idea: str
             "Show MVPilot retrieving context, scoping the MVP, generating repo "
             "artifacts, hitting a build blocker, applying recovery, and ending "
             "with README, script, and pitch content."
+            f"{warning_note}"
         ),
         beats=[
             "Enter the project idea.",
@@ -635,24 +721,34 @@ def _demo_script_payload(mode: ModelMode, fallback_reason: str | None, idea: str
             mode,
             fallback_reason,
             [
-                "Built the script around observable dashboard moments.",
+                f"Built the script around observable {title} dashboard moments.",
                 "Kept the blocker in the story instead of hiding it.",
             ],
         ),
     ).model_dump()
 
 
-def _pitch_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+def _pitch_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
     label = _idea_label(idea)
+    title = _project_title(idea, prompt)
+    warning_summary = _source_warning_summary(prompt)
+    content = (
+        f"MVPilot helps teams move from idea to credible MVP evidence fast. "
+        f"For {title}, {label}, it scopes the workflow, plans "
+        "the repo, generates artifacts, catches a build blocker, recovers, "
+        "and produces the final README, demo script, and pitch."
+    )
+    if warning_summary:
+        content = f"{content} {warning_summary}"
     return PitchOutput(
-        title="MVPilot",
+        title=title,
         tagline="An AI teammate that turns messy hackathon ideas into demo packages.",
-        content=(
-            f"MVPilot helps teams move from idea to credible MVP evidence fast. "
-            f"For this submitted idea, {label}, it scopes the workflow, plans "
-            "the repo, generates artifacts, catches a build blocker, recovers, "
-            "and produces the final README, demo script, and pitch."
-        ),
+        content=content,
         proof_points=[
             "Stable FastAPI task contracts for frontend integration.",
             "Structured Nemotron-style reasoning on model-backed steps.",
@@ -662,7 +758,7 @@ def _pitch_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> d
             mode,
             fallback_reason,
             [
-                "Focused the pitch on speed, traceability, and recovery.",
+                f"Focused the {title} pitch on speed, traceability, and recovery.",
                 "Used generated artifacts as the proof instead of broad claims.",
             ],
         ),

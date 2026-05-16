@@ -8,6 +8,18 @@ def _json_block(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True)
 
 
+def _context_contract() -> str:
+    return (
+        "Frontend intake is the user's source of truth for project identity, "
+        "idea, submitted URLs, uploaded files, GitHub connection markers, and final labels. "
+        "Use frontendIntake, sourceContext, and resolvedTechStack as structured build context. "
+        "Source material grounds the build. "
+        "required RAG rules override user preference and MVPilot defaults. "
+        "resolvedTechStack is binding for architecture/tests/files. "
+        "Surface missing or unreadable sources as warnings, not silent omissions."
+    )
+
+
 def build_scope_mvp_prompt(
     *,
     idea: str,
@@ -20,6 +32,9 @@ def build_scope_mvp_prompt(
     return (
         "Scope this hackathon idea into one demo-ready MVP.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
         f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Structured build context (highest priority — follow critical items first):\n"
         f"{_json_block(build_context)}\n\n"
@@ -42,6 +57,9 @@ def build_plan_repo_prompt(
     return (
         "Plan the smallest generated repository package for this MVP.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
         f"MVP scope:\n{_json_block(mvp_scope)}\n\n"
         f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Structured build context:\n{_json_block(build_context)}\n\n"
@@ -57,10 +75,16 @@ def build_file_manifest_prompt(
     *,
     idea: str,
     repo_plan: dict[str, Any],
+    build_context: dict[str, Any],
 ) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Create the generated artifact manifest for the MVP repo.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Repo plan:\n{_json_block(repo_plan)}\n\n"
         "Return artifact names, kinds, summaries, optional content, mode, and "
         "decision trace."
@@ -87,10 +111,16 @@ def build_final_readme_prompt(
     mvp_scope: dict[str, Any],
     repo_plan: dict[str, Any],
     generated_artifacts: list[dict[str, Any]],
+    build_context: dict[str, Any],
 ) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Write the final README content for the generated MVP package.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"MVP scope:\n{_json_block(mvp_scope)}\n\n"
         f"Repo plan:\n{_json_block(repo_plan)}\n\n"
         f"Artifacts:\n{_json_block(generated_artifacts)}\n\n"
@@ -102,10 +132,16 @@ def build_demo_script_prompt(
     *,
     idea: str,
     blocker_analysis: dict[str, Any] | None,
+    build_context: dict[str, Any],
 ) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Write a short demo script for judges.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Blocker analysis:\n{_json_block(blocker_analysis or {})}\n\n"
         "Return title, script content, demo beats, and decision trace."
     )
@@ -116,10 +152,16 @@ def build_pitch_prompt(
     idea: str,
     final_readme: dict[str, Any],
     demo_script: dict[str, Any],
+    build_context: dict[str, Any],
 ) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Write the final hackathon pitch for this package.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Prompt contract:\n{_context_contract()}\n\n"
+        f"Frontend intake:\n{_json_block(build_context.get('frontendIntake', {}))}\n\n"
+        f"Source context:\n{_json_block(build_context.get('sourceContext', {}))}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"README:\n{_json_block(final_readme)}\n\n"
         f"Demo script:\n{_json_block(demo_script)}\n\n"
         "Return title, tagline, pitch content, proof points, and decision trace."

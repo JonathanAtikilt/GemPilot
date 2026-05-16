@@ -61,8 +61,106 @@ def test_run_agent_accepts_frontend_form_payload_without_healthcare_mock(
     data = detail_response.json()
     assert data["task"]["idea"] == FRONTEND_IDEA
     assert data["task"]["repo_visibility"] == "public"
+    assert data["task"]["title"] == "Study planner"
+    assert data["task"]["primary_rules_url"] == "https://example.com/hackathon-rules"
+    assert data["task"]["source"] == "mvpilot_frontend"
     assert data["final_report"]["readme"]["content"].count(FRONTEND_IDEA) >= 1
     assert "healthcare" not in data["final_report"]["readme"]["content"].lower()
+
+
+def test_run_agent_accepts_current_frontend_multipart_payload(
+    client,
+    mock_live_rag_search,
+):
+    response = client.post(
+        "/agent/run",
+        data={
+            "title": "Clinic Navigator",
+            "idea": FRONTEND_IDEA,
+            "primary_rules_url": "https://example.com/rules",
+            "additional_urls": [
+                "https://example.com/judging",
+                "https://developer.nvidia.com/nemotron",
+            ],
+            "github_auth_code": "temporary-oauth-code",
+            "source": "mvpilot_frontend",
+        },
+        files=[
+            (
+                "additional_files",
+                ("notes.md", b"# Notes\nUse the hackathon rubric.", "text/markdown"),
+            )
+        ],
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+
+    detail_response = client.get(f"/agent/tasks/{task_id}")
+    assert detail_response.status_code == 200
+    data = detail_response.json()
+    task = data["task"]
+    assert task["title"] == "Clinic Navigator"
+    assert task["primary_rules_url"] == "https://example.com/rules"
+    assert task["additional_urls"] == [
+        "https://example.com/judging",
+        "https://developer.nvidia.com/nemotron",
+    ]
+    assert task["additional_files"] == [
+        {
+            "name": "notes.md",
+            "content_type": "text/markdown",
+            "size_bytes": 33,
+        }
+    ]
+    assert task["github_connected"] is True
+    assert task["source"] == "mvpilot_frontend"
+    assert "temporary-oauth-code" not in detail_response.text
+
+
+def test_run_agent_accepts_frontend_json_payload(client, mock_live_rag_search):
+    response = client.post(
+        "/agent/run",
+        json={
+            "title": "Study Planner",
+            "idea": f"  {FRONTEND_IDEA}  ",
+            "primary_rules_url": " https://example.com/rules ",
+            "additional_urls": [" ", "https://example.com/judging"],
+            "additional_files": [
+                {
+                    "name": "notes.md",
+                    "content_type": "text/markdown",
+                    "size_bytes": 33,
+                }
+            ],
+            "source": "mvpilot_frontend",
+            "github_connected": True,
+            "github_connection_id": " gh_conn_123 ",
+            "repo_visibility": "public",
+        },
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+
+    detail_response = client.get(f"/agent/tasks/{task_id}")
+    assert detail_response.status_code == 200
+    task = detail_response.json()["task"]
+    assert task["title"] == "Study Planner"
+    assert task["idea"] == FRONTEND_IDEA
+    assert task["primary_rules_url"] == "https://example.com/rules"
+    assert task["additional_urls"] == ["https://example.com/judging"]
+    assert task["additional_files"] == [
+        {
+            "name": "notes.md",
+            "content_type": "text/markdown",
+            "size_bytes": 33,
+        }
+    ]
+    assert task["github_connected"] is True
+    assert task["github_connection_id"] == "gh_conn_123"
+    assert "uploaded_file_contents" not in detail_response.text
+    assert "temporary-oauth-code" not in detail_response.text
 
 
 def test_run_agent_defaults_demo_mode_to_false(client):

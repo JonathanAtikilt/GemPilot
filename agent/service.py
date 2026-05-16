@@ -16,6 +16,7 @@ from agent.schemas import (
     TaskDetailResponse,
 )
 from agent.task_store import InMemoryTaskStore
+from agent.frontend_intake import build_frontend_intake_from_task
 from agent.workflow import build_initial_state, build_workflow
 
 
@@ -36,6 +37,8 @@ class AgentService:
 
     async def run_task_workflow(self, task_id: str) -> None:
         detail = await self._task_store.get_task(task_id)
+        uploaded_files = await self._task_store.get_uploaded_file_contents(task_id)
+        frontend_intake = build_frontend_intake_from_task(detail.task).model_dump()
         state = build_initial_state(
             task_id=task_id,
             idea=detail.task.idea,
@@ -43,6 +46,16 @@ class AgentService:
             demo_mode=detail.task.demo_mode,
             source_urls=detail.task.source_urls,
             settings=self._settings,
+            frontend_intake=frontend_intake,
+            uploaded_file_contents=[
+                {
+                    "name": file.name,
+                    "content_type": file.content_type,
+                    "size_bytes": file.size_bytes,
+                    "content": file.content,
+                }
+                for file in uploaded_files
+            ],
         )
         
         from agent.live_adapters import LiveRagMemoryAdapter
