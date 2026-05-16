@@ -32,6 +32,7 @@ from agent.prompts import (
     build_scope_mvp_prompt,
 )
 from agent.schemas import AgentStep
+from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
 StepReducer = Annotated[list[AgentStep], operator.add]
@@ -64,146 +65,6 @@ class WorkflowState(TypedDict):
     final_report: NotRequired[dict[str, Any] | None]
     failure_reason: NotRequired[str | None]
 
-
-class MockAuditAdapter:
-    def __init__(self, *, model_name: str) -> None:
-        self._model_name = model_name
-
-    def step(
-        self,
-        *,
-        node_name: str,
-        message: str,
-        decision_trace: list[str],
-        status: str = "completed",
-        prompt_purpose: str | None = None,
-        model_mode: Literal["mock", "live", "fallback"] | None = None,
-    ) -> AgentStep:
-        return AgentStep(
-            node_name=node_name,
-            status=status,
-            message=message,
-            model=self._model_name,
-            prompt_purpose=prompt_purpose,
-            model_mode=model_mode,
-            decision_trace=[
-                "Mock mode: deterministic Nemotron-style reasoning.",
-                *decision_trace,
-            ],
-            timestamp=datetime.now(UTC),
-        )
-
-
-class MockRetrievalAdapter:
-    def retrieve(self, idea: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        docs = [
-            {
-                "source": "hackathon_brief",
-                "title": "MVPilot healthcare demo lane",
-                "snippet": (
-                    "Mock mode: prioritize a visible referral workflow, judge-ready "
-                    "README, and short pitch package."
-                ),
-                "query": idea,
-                "score": 0.94,
-            },
-            {
-                "source": "nvidia_reference",
-                "title": "Nemotron reasoning pattern",
-                "snippet": (
-                    "Mock mode: every agent step should expose model name and a "
-                    "compact decision trace."
-                ),
-                "score": 0.91,
-            },
-        ]
-        memories = [
-            {
-                "source": "previous_demo",
-                "summary": (
-                    "Mock mode: healthcare referral demos land better when blockers "
-                    "show recovery instead of a perfect run."
-                ),
-                "score": 0.88,
-            },
-            {
-                "source": "team_split",
-                "summary": (
-                    "Mock mode: Person 1 owns orchestration and produces artifacts "
-                    "for downstream UI/demo surfaces."
-                ),
-                "score": 0.84,
-            },
-        ]
-        return docs, memories
-
-
-class MockToolAdapter:
-    def create_repo(
-        self,
-        *,
-        task_id: str,
-        visibility: str,
-    ) -> dict[str, Any]:
-        repo_name = f"mvpilot-demo-{task_id[:8]}"
-        return {
-            "tool": "github.create_repo",
-            "status": "success",
-            "mock_mode": True,
-            "recoverable": False,
-            "repo": {
-                "name": repo_name,
-                "visibility": visibility,
-                "url": f"https://github.com/mock-org/{repo_name}",
-            },
-            "summary": "Mock mode: created deterministic GitHub repository record.",
-        }
-
-    def commit_files(
-        self,
-        *,
-        repo_name: str,
-        files: list[str],
-    ) -> dict[str, Any]:
-        return {
-            "tool": "github.commit_files",
-            "status": "success",
-            "mock_mode": True,
-            "recoverable": False,
-            "repo": repo_name,
-            "files": files,
-            "commit_sha": "mock-commit-0001",
-            "summary": "Mock mode: committed generated MVP package files.",
-        }
-
-    def verify_build(self, *, recovered: bool) -> dict[str, Any]:
-        if not recovered:
-            return {
-                "tool": "build.verify",
-                "status": "failed",
-                "mock_mode": True,
-                "recoverable": True,
-                "error": "Mock mode: missing demo dependency in generated package.",
-                "summary": "Mock mode: build failed with a recoverable dependency gap.",
-            }
-        return {
-            "tool": "build.verify",
-            "status": "success",
-            "mock_mode": True,
-            "recoverable": False,
-            "checks": ["unit", "lint", "package"],
-            "summary": "Mock mode: build verification passed after recovery.",
-        }
-
-    def recover_build(self) -> dict[str, Any]:
-        return {
-            "tool": "build.apply_recovery_patch",
-            "status": "success",
-            "mock_mode": True,
-            "recoverable": False,
-            "patch": "Add deterministic demo dependency stub.",
-            "summary": "Mock mode: applied recovery patch for the blocked build.",
-        }
 
 
 def build_initial_state(
@@ -238,14 +99,14 @@ def build_workflow(
     settings: Settings,
     *,
     model_client: ModelClient | None = None,
-    audit: MockAuditAdapter | None = None,
-    retrieval: MockRetrievalAdapter | None = None,
-    tools: MockToolAdapter | None = None,
+    audit: AuditAdapter | None = None,
+    retrieval: RagMemoryAdapter | None = None,
+    tools: ToolAdapter | None = None,
 ):
-    active_audit = audit or MockAuditAdapter(model_name=settings.nemotron_fast_model)
+    active_audit = audit or InMemoryAuditAdapter(model_name=settings.nemotron_fast_model)
     active_model_client = model_client or _build_default_model_client(settings)
-    active_retrieval = retrieval or MockRetrievalAdapter()
-    active_tools = tools or MockToolAdapter()
+    active_retrieval = retrieval or InMemoryRagMemoryAdapter()
+    active_tools = tools or InMemoryToolAdapter()
 
     def append_step(
         *,
@@ -254,7 +115,7 @@ def build_workflow(
         decision_trace: list[str],
         status: str = "completed",
     ) -> dict[str, list[AgentStep]]:
-        step = active_audit.step(
+        step = active_audit.write_audit_log(
             node_name=node_name,
             message=message,
             decision_trace=decision_trace,
@@ -297,8 +158,12 @@ def build_workflow(
             ],
         )
 
-    def retrieve_context(state: WorkflowState) -> dict[str, Any]:
-        docs, memories = active_retrieval.retrieve(state["idea"])
+    async def retrieve_context(state: WorkflowState) -> dict[str, Any]:
+        docs = (
+            await active_retrieval.retrieve_hackathon_context(state["idea"])
+            + await active_retrieval.retrieve_nvidia_context(state["idea"])
+        )
+        memories = await active_retrieval.find_similar_builds(state["idea"])
         return {
             **append_step(
                 node_name="retrieve_context",
@@ -413,8 +278,11 @@ def build_workflow(
 
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
         repo_name = state.get("repo", {}).get("name", "mvpilot-demo")
-        files = [artifact["name"] for artifact in state["generated_artifacts"]]
-        tool_call = active_tools.commit_files(repo_name=repo_name, files=files)
+        files = [
+            {"path": artifact["name"], "content": f"Mock content for {artifact['name']}"}
+            for artifact in state["generated_artifacts"]
+        ]
+        tool_call = active_tools.commit_files(repo_name=repo_name, files=files, message="Add generated artifacts")
         return {
             **append_step(
                 node_name="commit_progress",
