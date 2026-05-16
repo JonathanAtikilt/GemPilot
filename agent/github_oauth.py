@@ -52,6 +52,7 @@ class GitHubConnectionRecord:
     created_at: datetime
     updated_at: datetime
     exchanged_at: datetime | None
+    workflow_task_id: str | None = None
 
 
 class GitHubConnectionStore(Protocol):
@@ -264,11 +265,13 @@ class GitHubConnectionService:
         record = self._store.get_connection(connection_id)
         if record.status == "exchanged" and record.encrypted_access_token and record.github_login:
             record = self._refresh_env_token_from_settings(record)
-            if task_id and record.task_id != task_id:
+            linked_task_id = task_id or record.workflow_task_id or record.task_id
+            if linked_task_id and record.workflow_task_id != linked_task_id:
                 record = self._store.update(
                     replace(
                         record,
-                        task_id=task_id,
+                        task_id=linked_task_id,
+                        workflow_task_id=linked_task_id,
                         updated_at=datetime.now(UTC),
                     )
                 )
@@ -306,9 +309,11 @@ class GitHubConnectionService:
             raise GitHubOAuthError("GitHub user response did not include a login.")
 
         scopes = _parse_scopes(str(token_payload.get("scope") or ""))
+        linked_task_id = task_id or record.workflow_task_id or record.task_id
         exchanged = replace(
             record,
-            task_id=task_id or record.task_id,
+            task_id=linked_task_id,
+            workflow_task_id=linked_task_id,
             encrypted_pending_code=None,
             encrypted_access_token=self._encrypt(token),
             scopes=scopes,
@@ -594,9 +599,11 @@ def _safe_int(value: object) -> int | None:
 
 
 def _record_to_row(record: GitHubConnectionRecord) -> dict[str, object]:
-    return {
+    # Orchestrator task ids live in memory unless synced to public.tasks; avoid FK violations.
+    workflow_task_id = record.workflow_task_id or record.task_id
+    row: dict[str, object] = {
         "id": record.id,
-        "task_id": record.task_id,
+        "task_id": None,
         "state_hash": record.state_hash,
         "encrypted_pending_code": record.encrypted_pending_code,
         "encrypted_access_token": record.encrypted_access_token,
@@ -610,12 +617,18 @@ def _record_to_row(record: GitHubConnectionRecord) -> dict[str, object]:
         "updated_at": record.updated_at.isoformat(),
         "exchanged_at": record.exchanged_at.isoformat() if record.exchanged_at else None,
     }
+    if workflow_task_id:
+        row["workflow_task_id"] = workflow_task_id
+    return row
 
 
 def _row_to_record(row: dict[str, object]) -> GitHubConnectionRecord:
+    workflow_task_id = str(row["workflow_task_id"]) if row.get("workflow_task_id") else None
+    legacy_task_id = str(row["task_id"]) if row.get("task_id") else None
     return GitHubConnectionRecord(
         id=str(row["id"]),
-        task_id=str(row["task_id"]) if row.get("task_id") else None,
+        task_id=workflow_task_id or legacy_task_id,
+        workflow_task_id=workflow_task_id,
         state_hash=str(row["state_hash"]),
         encrypted_pending_code=str(row["encrypted_pending_code"]) if row.get("encrypted_pending_code") else None,
         encrypted_access_token=str(row["encrypted_access_token"]) if row.get("encrypted_access_token") else None,
