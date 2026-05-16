@@ -1,0 +1,2 @@
+-- Optional seed data for local resets and preview branches.
+-- RAG chunks are populated via POST /rag/ingest, not static seeds.

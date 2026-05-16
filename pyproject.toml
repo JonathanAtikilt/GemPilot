@@ -12,8 +12,10 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
+    "python-dotenv",
     "httpx",
     "langgraph",
+    "supabase",
 ]
 
 [project.optional-dependencies]
