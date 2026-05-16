@@ -73,7 +73,7 @@ async def test_get_build_context_returns_all_categories(monkeypatch) -> None:
 
     async def fake_search(query: str, top_k: int, doc_types=None):
         assert doc_types == BUILD_CONTEXT_DOC_TYPES
-        return chunks[:top_k], None
+        return chunks[:top_k]
 
     monkeypatch.setattr("agent.rag.build_context.search_rag", fake_search)
 
@@ -98,9 +98,9 @@ async def test_get_build_context_returns_all_categories(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_build_context_uses_fallback_defaults_when_no_chunks(monkeypatch) -> None:
+async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeypatch) -> None:
     async def fake_search(query: str, top_k: int, doc_types=None):
-        return [], None
+        return []
 
     monkeypatch.setattr("agent.rag.build_context.search_rag", fake_search)
 
@@ -108,12 +108,12 @@ async def test_get_build_context_uses_fallback_defaults_when_no_chunks(monkeypat
         BuildContextRequest(projectId="p1", idea="AI teammate", topK=8)
     )
 
-    assert response.requiredDeliverables[0].source == "mvpilot://defaults"
-    assert response.allowedToolsAndAPIs[0].item == "NVIDIA API"
-    assert response.requiredRepositoryFormat[0].item == "README.md"
-    assert response.requiredDemoFormat[0].item.startswith("Show user entering")
-    assert response.requiredTechStackPieces[0].item.startswith("React or Next.js")
-    assert response.scopeWarnings
+    assert response.requiredDeliverables == []
+    assert response.allowedToolsAndAPIs == []
+    assert response.requiredRepositoryFormat == []
+    assert response.requiredDemoFormat == []
+    assert response.requiredTechStackPieces == []
+    assert response.scopeWarnings == []
     assert response.evidence == []
 
 

@@ -32,7 +32,8 @@ from agent.prompts import (
     build_scope_mvp_prompt,
 )
 from agent.schemas import AgentStep
-from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
+from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryToolAdapter
+from agent.live_adapters import LiveRagMemoryAdapter
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
 StepReducer = Annotated[list[AgentStep], operator.add]
@@ -50,6 +51,7 @@ class WorkflowState(TypedDict):
     agent_steps: StepReducer
     graph_trace: StepReducer
     retrieved_docs: ListReducer
+    build_context: NotRequired[dict[str, Any]]
     memory_matches: ListReducer
     tool_calls: ListReducer
     generated_artifacts: ListReducer
@@ -87,6 +89,7 @@ def build_initial_state(
         "agent_steps": [],
         "graph_trace": [],
         "retrieved_docs": [],
+        "build_context": {},
         "memory_matches": [],
         "tool_calls": [],
         "generated_artifacts": [],
@@ -105,7 +108,7 @@ def build_workflow(
 ):
     active_audit = audit or InMemoryAuditAdapter(model_name=settings.nemotron_fast_model)
     active_model_client = model_client or _build_default_model_client(settings)
-    active_retrieval = retrieval or InMemoryRagMemoryAdapter()
+    active_retrieval = retrieval or LiveRagMemoryAdapter()
     active_tools = tools or InMemoryToolAdapter()
 
     def append_step(
@@ -159,20 +162,45 @@ def build_workflow(
         )
 
     async def retrieve_context(state: WorkflowState) -> dict[str, Any]:
+        build_context = await active_retrieval.retrieve_build_context(
+            state["task_id"],
+            state["idea"],
+            top_k=8,
+        )
         docs = (
             await active_retrieval.retrieve_hackathon_context(state["idea"])
             + await active_retrieval.retrieve_nvidia_context(state["idea"])
         )
         memories = await active_retrieval.find_similar_builds(state["idea"])
+
+        evidence_count = len(build_context.get("evidence", []))
+        context_mode = build_context.get("mode", "unknown")
+        critical_count = sum(
+            1
+            for field in (
+                "requiredDeliverables",
+                "allowedToolsAndAPIs",
+                "requiredRepositoryFormat",
+                "requiredDemoFormat",
+                "requiredTechStackPieces",
+            )
+            for item in build_context.get(field, [])
+            if item.get("priority") == "critical"
+        )
+
         return {
             **append_step(
                 node_name="retrieve_context",
-                message="Retrieved hackathon guidance and prior memory matches.",
+                message="Retrieved structured RAG build context for the orchestrator.",
                 decision_trace=[
-                    "Seeded context from deterministic RAG snippets.",
-                    "Selected healthcare demo memories tied to blocker recovery.",
+                    f"Loaded build context via RAG adapter (mode={context_mode}).",
+                    f"Structured constraints: {len(build_context.get('requiredDeliverables', []))} deliverables, "
+                    f"{len(build_context.get('requiredTechStackPieces', []))} stack items, "
+                    f"{critical_count} critical priorities, {evidence_count} evidence chunks.",
+                    f"Augmented with {len(docs)} retrieved doc matches and {len(memories)} memory matches.",
                 ],
             ),
+            "build_context": build_context,
             "retrieved_docs": docs,
             "memory_matches": memories,
         }
@@ -183,6 +211,7 @@ def build_workflow(
             model=settings.nemotron_model,
             prompt=build_scope_mvp_prompt(
                 idea=state["idea"],
+                build_context=state.get("build_context", {}),
                 retrieved_docs=state["retrieved_docs"],
                 memory_matches=state["memory_matches"],
             ),
@@ -207,6 +236,7 @@ def build_workflow(
             prompt=build_plan_repo_prompt(
                 idea=state["idea"],
                 mvp_scope=state.get("mvp_scope", {}),
+                build_context=state.get("build_context", {}),
             ),
             response_model=RepoPlanOutput,
             max_tokens=900,

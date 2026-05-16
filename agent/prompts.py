@@ -11,16 +11,20 @@ def _json_block(value: Any) -> str:
 def build_scope_mvp_prompt(
     *,
     idea: str,
+    build_context: dict[str, Any],
     retrieved_docs: list[dict[str, Any]],
     memory_matches: list[dict[str, Any]],
 ) -> str:
     return (
         "Scope this hackathon idea into one demo-ready MVP.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Structured build context (highest priority — follow critical items first):\n"
+        f"{_json_block(build_context)}\n\n"
         f"Retrieved docs:\n{_json_block(retrieved_docs)}\n\n"
         f"Memory matches:\n{_json_block(memory_matches)}\n\n"
-        "Return target user, must-have features, demo boundary, mode, and a "
-        "short decision trace."
+        "Honor required deliverables, allowed tools/APIs, repository format, demo format, "
+        "tech stack pieces, and scope warnings from build context. "
+        "Return target user, must-have features, demo boundary, mode, and a short decision trace."
     )
 
 
@@ -28,11 +32,14 @@ def build_plan_repo_prompt(
     *,
     idea: str,
     mvp_scope: dict[str, Any],
+    build_context: dict[str, Any],
 ) -> str:
     return (
         "Plan the smallest generated repository package for this MVP.\n\n"
         f"Idea:\n{idea}\n\n"
         f"MVP scope:\n{_json_block(mvp_scope)}\n\n"
+        f"Structured build context:\n{_json_block(build_context)}\n\n"
+        "Align files and layout with requiredRepositoryFormat and allowedToolsAndAPIs. "
         "Return files, test plan, architecture notes, mode, and decision trace."
     )
 

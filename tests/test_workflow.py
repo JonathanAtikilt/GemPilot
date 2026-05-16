@@ -19,7 +19,7 @@ VALID_IDEA = (
 
 
 @pytest.mark.asyncio
-async def test_full_workflow_completes_with_expected_timeline():
+async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_search):
     settings = Settings(_env_file=None, adapter_mode="mock")
     task_store = InMemoryTaskStore()
     service = AgentService(task_store, settings)
@@ -53,6 +53,14 @@ async def test_full_workflow_completes_with_expected_timeline():
         "report_result",
     ]
     assert detail.retrieved_docs
+    assert detail.build_context
+    assert detail.build_context.get("requiredDeliverables")
+    assert detail.build_context.get("allowedToolsAndAPIs")
+    assert detail.build_context.get("requiredRepositoryFormat")
+    assert detail.build_context.get("requiredDemoFormat")
+    assert detail.build_context.get("requiredTechStackPieces")
+    assert detail.build_context.get("mode") == "live"
+    assert detail.build_context.get("evidence")
     assert detail.memory_matches
     assert detail.final_report is not None
     assert detail.final_report["mode"] == "mock"
@@ -110,7 +118,7 @@ def test_route_after_tool_result_fails_unrecoverable_result():
 
 
 @pytest.mark.asyncio
-async def test_unrecoverable_tool_result_marks_workflow_failed():
+async def test_unrecoverable_tool_result_marks_workflow_failed(mock_live_rag_search):
     class UnrecoverableToolAdapter(InMemoryToolAdapter):
         def verify_build(self, *, recovered: bool) -> dict:
             return {

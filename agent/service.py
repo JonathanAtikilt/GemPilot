@@ -44,15 +44,18 @@ class AgentService:
             settings=self._settings,
         )
         
+        from agent.live_adapters import LiveRagMemoryAdapter
+
+        rag = LiveRagMemoryAdapter()
         if self._settings.mock_mode:
-            from agent.adapters import InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
+            from agent.adapters import InMemoryAuditAdapter, InMemoryToolAdapter
+
             tools = InMemoryToolAdapter()
-            rag = InMemoryRagMemoryAdapter()
             audit = InMemoryAuditAdapter(model_name=self._settings.nemotron_fast_model)
         else:
-            from agent.live_adapters import LiveAuditAdapter, LiveRagMemoryAdapter, LiveToolAdapter
+            from agent.live_adapters import LiveAuditAdapter, LiveToolAdapter
+
             tools = LiveToolAdapter()
-            rag = LiveRagMemoryAdapter()
             audit = LiveAuditAdapter(model_name=self._settings.nemotron_fast_model)
 
         workflow = build_workflow(self._settings, tools=tools, retrieval=rag, audit=audit)
@@ -101,6 +104,7 @@ class AgentService:
             "status": TaskStatus.FAILED,
             "agent_steps": [*detail.agent_steps, step],
             "retrieved_docs": detail.retrieved_docs,
+            "build_context": detail.build_context or {},
             "memory_matches": detail.memory_matches,
             "tool_calls": detail.tool_calls,
             "generated_artifacts": detail.generated_artifacts,
