@@ -28,6 +28,61 @@ The team's job is not to build a generic chatbot. The goal is a deployed agent w
 
 ---
 
+## Track Positioning
+
+Primary track:
+
+```text
+Best Use of NVIDIA Nemotron
+```
+
+MVPilot fits this track because it is an agent that reasons, plans, uses tools, executes a multi-step workflow, and shows its decision process. The project should be pitched as a Nemotron-powered autonomous build agent, not as a chatbot and not primarily as a security sandbox demo.
+
+Core judging alignment:
+
+```text
+Autonomous reasoning:
+  Nemotron turns a messy idea into a scoped MVP and decides the next build step.
+
+Multi-step workflow:
+  MVPilot retrieves docs, scopes, creates a repo, commits files, verifies work, handles blockers, and reports.
+
+Tool integration:
+  MVPilot uses GitHub, Supabase RAG/memory, and optional Slack/deployment tools.
+
+Agentic RAG:
+  MVPilot decides when hackathon, NVIDIA, and project docs are needed.
+
+Real-world applicability:
+  MVPilot solves a real hackathon problem: going from vague idea to demo-ready MVP.
+
+Nemotron-specific strength:
+  Nemotron is used for planning, tool-use reasoning, MVP scoping, blocker analysis, and final pitch generation.
+```
+
+Brev/cloud positioning:
+
+```text
+Use Brev as the preferred cloud runtime if the team can deploy there.
+Use NVIDIA-hosted Nemotron endpoints or NVIDIA NIM/build.nvidia.com endpoints for model access.
+If Brev deployment is too slow, still keep the backend cloud-deployed and clearly show Nemotron model calls.
+```
+
+Optional track extension:
+
+```text
+NemoClaw can be mentioned as a future security layer, but it should not be the main story unless the team adds policy files, sandbox logs, and a blocked unsafe action demo.
+```
+
+Recommended Nemotron models:
+
+```text
+nvidia/nemotron-3-super-120b-a12b
+nvidia/nemotron-3-nano-30b-a3b
+```
+
+---
+
 ## Final 4-Person Ownership
 
 | Member | Role | Owns | Main Output |
@@ -69,9 +124,39 @@ Python
 FastAPI
 OpenClaw
 NVIDIA Nemotron
+NVIDIA NIM or build.nvidia.com Nemotron endpoint
+Brev cloud runtime, preferred if available
 Pydantic
 Supabase Python client
 Custom state machine
+```
+
+## Regular Nemotron Track Requirements
+
+Person 1 must make Nemotron's role obvious in the backend and demo.
+
+Required:
+
+```text
+- Store the exact Nemotron model name used for each reasoning step.
+- Log why Nemotron chose the next tool/action.
+- Show the reasoning plan as structured steps, not hidden prose.
+- Use Nemotron for at least MVP scoping, build planning, blocker analysis, and final report generation.
+- Keep fallback responses clearly labeled as fallback mode if the model endpoint is unavailable.
+```
+
+Preferred models:
+
+```text
+nvidia/nemotron-3-super-120b-a12b for deep planning and final synthesis
+nvidia/nemotron-3-nano-30b-a3b for faster summaries and helper tasks
+```
+
+Cloud runtime:
+
+```text
+Deploy the FastAPI/OpenClaw agent backend on Brev if possible.
+If Brev is not ready in time, deploy on Render, Railway, Fly.io, or another cloud host and call NVIDIA-hosted Nemotron endpoints.
 ```
 
 ## Main Files To Build
@@ -190,6 +275,7 @@ Use Nemotron for:
 - Cleaning up the messy idea
 - Scoping the idea into a realistic MVP
 - Choosing the first generated file structure
+- Choosing which tools to call and in what order
 - Summarizing retrieved hackathon/NVIDIA docs
 - Deciding which tool call comes next
 - Explaining blockers
@@ -257,6 +343,8 @@ By integration time, Person 1 must provide:
 - Running FastAPI backend
 - OpenClaw-driven workflow skeleton
 - Nemotron prompt calls
+- Nemotron model name and decision trace in audit logs
+- Brev/cloud deployment plan for the agent backend
 - State machine with clear step names
 - Tool router that can call Person 2 and Person 3 modules
 - Final report generator
@@ -270,6 +358,8 @@ Person 1 is done when:
 ```text
 - /health returns OK
 - /agent/run creates a task and starts the workflow
+- Nemotron is used in the main workflow, not only mentioned in the README
+- The dashboard can show Nemotron's plan/tool decision trace
 - The workflow writes visible audit logs
 - The workflow can call the RAG layer
 - The workflow can call the GitHub/tool layer
@@ -451,6 +541,8 @@ Hackathon rules
 Judging criteria
 OpenClaw setup notes
 Nemotron model notes
+Brev/cloud deployment notes
+NVIDIA NIM or build.nvidia.com endpoint notes
 NemoClaw safety notes, if used
 GitHub repo requirements
 MVPilot project idea
@@ -998,6 +1090,7 @@ Person 4 owns:
 ```text
 - Frontend deployment
 - Backend deployment coordination
+- Brev deployment path if available
 - Environment variable checklist
 - Demo backup plan
 - Screenshots or recording if live APIs fail
@@ -1007,8 +1100,9 @@ Recommended deployment:
 
 ```text
 Frontend: Vercel
-Backend: Render, Railway, Fly.io, Brev, or DGX Spark
+Backend: Brev preferred for the Nemotron/cloud track; Render, Railway, Fly.io, or DGX Spark as fallback
 Database: hosted Supabase
+Model access: NVIDIA-hosted Nemotron endpoint through build.nvidia.com or NIM
 ```
 
 ## Person 4 Deliverables
@@ -1073,7 +1167,12 @@ Everyone should use this shape:
   "message": "Scoped the broad healthcare workflow into one referral coordination MVP.",
   "data": {
     "source_count": 4,
-    "model": "llama-3.3-nemotron-super-49b-v1.5"
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "decision_trace": [
+      "Retrieved hackathon and NVIDIA context.",
+      "Scoped the idea to one referral workflow.",
+      "Chose GitHub repo creation as the next tool action."
+    ]
   }
 }
 ```
@@ -1144,6 +1243,7 @@ Person 1:
 - FastAPI app
 - State machine skeleton
 - Mock Nemotron responses if model setup is not ready
+- Model client for NVIDIA-hosted Nemotron endpoint
 - Calls to stubbed Person 2 and Person 3 functions
 ```
 
@@ -1191,7 +1291,7 @@ Integration steps:
 4. Person 1 scopes MVP with Nemotron or fallback.
 5. Person 1 calls Person 3 create_repo and commit_files.
 6. Person 3 verifies commit.
-7. Person 4 shows every step.
+7. Person 4 shows every step, including the Nemotron decision trace.
 ```
 
 ## Hours 10-16: Add Winning Features
@@ -1258,6 +1358,7 @@ Do not expand scope until these work:
 - /agent/run backend endpoint
 - RAG retrieval from seeded docs
 - Nemotron-powered MVP scoping
+- Visible Nemotron model name and decision trace
 - GitHub repo creation
 - File commit to generated repo
 - Build log generation
@@ -1303,8 +1404,11 @@ This structure gives the judges something concrete to inspect.
 ```text
 NVIDIA_API_KEY
 NEMOTRON_MODEL
+NEMOTRON_BASE_URL
+NVIDIA_NIM_BASE_URL, optional
 OPENCLAW_API_KEY
 AGENT_BACKEND_URL
+BREV_INSTANCE_URL, optional
 ```
 
 ## Person 2
@@ -1405,6 +1509,7 @@ Show:
 ```text
 - MVPilot retrieves hackathon and NVIDIA guidance
 - Nemotron scopes the idea into one realistic MVP
+- The dashboard shows the Nemotron model and decision trace
 - MVPilot creates the GitHub repo
 - MVPilot commits the generated structure
 - MVPilot logs every step
@@ -1416,7 +1521,7 @@ Show:
 ## Closing
 
 ```text
-MVPilot is not just a planner. It creates the repo, builds the MVP, commits progress, verifies work, stores memory, and produces the final demo package.
+MVPilot is not just a planner. It is a Nemotron-powered autonomous build agent that creates the repo, builds the MVP, commits progress, verifies work, stores memory, and produces the final demo package.
 ```
 
 ---
@@ -1428,6 +1533,9 @@ Before submission:
 ```text
 - Frontend is deployed
 - Backend is deployed
+- Brev deployment is live, or the cloud fallback is clearly working
+- Nemotron endpoint is working
+- The exact Nemotron model name is visible in the demo
 - Supabase database has seed docs
 - GitHub token works
 - Generated repo link opens
@@ -1442,4 +1550,3 @@ Before submission:
 - Backup generated repo exists
 - Backup screenshots or recording exist
 ```
-
