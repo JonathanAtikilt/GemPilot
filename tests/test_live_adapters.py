@@ -8,7 +8,16 @@ from agent.rag.errors import RagConfigurationError
 @pytest.mark.asyncio
 async def test_live_rag_memory_adapter():
     adapter = LiveRagMemoryAdapter()
-    with patch("agent.live_adapters.search_rag", new_callable=AsyncMock) as mock_search:
+    with patch("agent.live_adapters.search_rag", new_callable=AsyncMock) as mock_search, \
+         patch("agent.rag.store.get_rag_store") as mock_get_store, \
+         patch("agent.rag.embed.embed_text", new_callable=AsyncMock) as mock_embed:
+        
+        mock_store = MagicMock()
+        mock_get_store.return_value = mock_store
+        mock_store.search_memories = AsyncMock(return_value=[{"id": "mock_chunk"}])
+        mock_store.write_memory = AsyncMock()
+        mock_embed.return_value = [0.1, 0.2]
+
         mock_result = MagicMock()
         mock_result.model_dump.return_value = {"id": "mock_chunk"}
         mock_search.return_value = [mock_result]
@@ -23,9 +32,12 @@ async def test_live_rag_memory_adapter():
 
         docs = await adapter.find_similar_builds("issue")
         assert docs == [{"id": "mock_chunk"}]
-        mock_search.assert_awaited_with(query="issue", top_k=5, doc_types=["build_log"])
+        mock_store.search_memories.assert_awaited_with([0.1, 0.2], top_k=5)
         
-        await adapter.write_memory({})
+        memory_payload = {"summary": "test summary"}
+        await adapter.write_memory(memory_payload)
+        mock_embed.assert_awaited_with("test summary", input_type="document")
+        mock_store.write_memory.assert_awaited_with({"summary": "test summary", "embedding": [0.1, 0.2]})
 
 
 @pytest.mark.asyncio

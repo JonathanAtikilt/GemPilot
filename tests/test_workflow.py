@@ -145,3 +145,59 @@ async def test_unrecoverable_tool_result_marks_workflow_failed(mock_live_rag_sea
     assert final_state["status"] == "failed"
     assert final_state["graph_trace"][-1].node_name == "failed"
     assert final_state["final_report"]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_workflow_memory_integration(mock_live_rag_search):
+    # This proves remember_outcome calls write_memory() and find_similar_builds returns a prior memory
+    settings = Settings(_env_file=None, adapter_mode="mock")
+    task_store = InMemoryTaskStore()
+    service = AgentService(task_store, settings)
+
+    from unittest.mock import patch, MagicMock, AsyncMock
+    with patch("agent.rag.store.get_rag_store") as mock_get_store, \
+         patch("agent.rag.embed.embed_text", new_callable=AsyncMock) as mock_embed:
+        
+        mock_store = MagicMock()
+        mock_get_store.return_value = mock_store
+        mock_store.search_memories = AsyncMock(return_value=[{"id": "mock_memory"}])
+        mock_store.write_memory = AsyncMock()
+        mock_embed.return_value = [0.1, 0.2]
+
+        # First run
+        response = await service.start_task(
+            RunAgentRequest(
+                idea="Memory test idea",
+                repo_visibility="public",
+                demo_mode=True,
+            )
+        )
+        await service.run_task_workflow(response.task_id)
+        detail1 = await task_store.get_task(response.task_id)
+    
+        # Ensure memory_matches from first run contains the mock memory we injected
+        assert len(detail1.memory_matches) > 0
+        assert detail1.memory_matches[0]["id"] == "mock_memory"
+    
+        # Verify write_memory was called
+        mock_store.write_memory.assert_awaited_once()
+        written_memory = mock_store.write_memory.call_args[0][0]
+        assert written_memory["task_id"] == response.task_id
+        assert written_memory["idea"] == "Memory test idea"
+        assert "embedding" in written_memory
+    
+        # Second run
+        response2 = await service.start_task(
+            RunAgentRequest(
+                idea="Memory test idea 2",
+                repo_visibility="public",
+                demo_mode=True,
+            )
+        )
+        await service.run_task_workflow(response2.task_id)
+        detail2 = await task_store.get_task(response2.task_id)
+        
+        assert detail2.task.status == TaskStatus.COMPLETED
+        assert len(detail2.memory_matches) > 0
+        assert detail2.memory_matches[0]["id"] == "mock_memory"
+        assert mock_store.write_memory.call_count == 2

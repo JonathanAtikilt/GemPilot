@@ -23,8 +23,11 @@ class LiveRagMemoryAdapter:
         return [r.model_dump() for r in results]
 
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
-        results = await search_rag(query=issue, top_k=5, doc_types=["build_log"])
-        return [r.model_dump() for r in results]
+        from agent.rag.store import get_rag_store
+        from agent.rag.embed import embed_text
+        store = get_rag_store()
+        query_embedding = await embed_text(issue, input_type="query")
+        return await store.search_memories(query_embedding, top_k=5)
 
     async def retrieve_build_context(
         self,
@@ -49,7 +52,14 @@ class LiveRagMemoryAdapter:
         return payload
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
-        pass
+        from agent.rag.store import get_rag_store
+        from agent.rag.embed import embed_text
+        store = get_rag_store()
+        summary = memory.get("summary", "")
+        if summary:
+            embedding = await embed_text(summary, input_type="document")
+            memory["embedding"] = embedding
+        await store.write_memory(memory)
 
 
 class LiveToolAdapter:

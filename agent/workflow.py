@@ -466,13 +466,31 @@ def build_workflow(
             "final_report": final_report,
         }
 
-    def remember_outcome(state: WorkflowState) -> dict[str, Any]:
+    async def remember_outcome(state: WorkflowState) -> dict[str, Any]:
+        final_report = state.get("final_report", {})
+        summary = final_report.get("summary", "Workflow completed.")
+        
+        payload = {
+            "task_id": state["task_id"],
+            "idea": state["idea"],
+            "summary": summary,
+            "outcome": {
+                "mvp_scope": state.get("mvp_scope"),
+                "repo_plan": state.get("repo_plan"),
+                "blocker_analysis": state.get("blocker_analysis"),
+                "generated_artifacts": state.get("generated_artifacts"),
+                "final_report": final_report,
+            },
+            "tags": ["workflow_outcome"],
+        }
+        await active_retrieval.write_memory(payload)
+        
         return append_step(
             node_name="remember_outcome",
-            message="Stored the mock outcome for future retrieval.",
+            message="Stored the outcome for future retrieval.",
             decision_trace=[
                 "Captured recovery pattern as a reusable memory note.",
-                "Kept persistence mocked until the live adapter feature.",
+                "Wrote memory to storage.",
             ],
         )
 
