@@ -45,6 +45,26 @@ class Settings(BaseSettings):
         default="https://integrate.api.nvidia.com/v1",
         validation_alias="NEMOTRON_BASE_URL",
     )
+    nemotron_timeout_seconds: float = Field(
+        default=30,
+        gt=0,
+        validation_alias="NEMOTRON_TIMEOUT_SECONDS",
+    )
+    nemotron_max_retries: int = Field(
+        default=1,
+        ge=0,
+        validation_alias="NEMOTRON_MAX_RETRIES",
+    )
+    nemotron_poll_attempts: int = Field(
+        default=3,
+        ge=1,
+        validation_alias="NEMOTRON_POLL_ATTEMPTS",
+    )
+    nemotron_poll_interval_seconds: float = Field(
+        default=1,
+        ge=0,
+        validation_alias="NEMOTRON_POLL_INTERVAL_SECONDS",
+    )
     openclaw_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="OPENCLAW_API_KEY",

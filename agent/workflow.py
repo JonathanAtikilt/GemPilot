@@ -7,6 +7,30 @@ from typing import Annotated, Any, Literal, NotRequired, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from agent.config import Settings
+from agent.model_client import (
+    DeterministicModelClient,
+    ModelCallResult,
+    ModelClient,
+    NemotronModelClient,
+)
+from agent.model_outputs import (
+    BlockerAnalysisOutput,
+    DemoScriptOutput,
+    FileManifestOutput,
+    FinalReadmeOutput,
+    MvpScopeOutput,
+    PitchOutput,
+    RepoPlanOutput,
+)
+from agent.prompts import (
+    build_blocker_analysis_prompt,
+    build_demo_script_prompt,
+    build_file_manifest_prompt,
+    build_final_readme_prompt,
+    build_pitch_prompt,
+    build_plan_repo_prompt,
+    build_scope_mvp_prompt,
+)
 from agent.schemas import AgentStep
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
@@ -32,6 +56,11 @@ class WorkflowState(TypedDict):
     repo: NotRequired[dict[str, Any]]
     mvp_scope: NotRequired[dict[str, Any]]
     repo_plan: NotRequired[dict[str, Any]]
+    file_manifest: NotRequired[dict[str, Any]]
+    blocker_analysis: NotRequired[dict[str, Any]]
+    final_readme: NotRequired[dict[str, Any]]
+    demo_script: NotRequired[dict[str, Any]]
+    pitch: NotRequired[dict[str, Any]]
     final_report: NotRequired[dict[str, Any] | None]
     failure_reason: NotRequired[str | None]
 
@@ -47,12 +76,16 @@ class MockAuditAdapter:
         message: str,
         decision_trace: list[str],
         status: str = "completed",
+        prompt_purpose: str | None = None,
+        model_mode: Literal["mock", "live", "fallback"] | None = None,
     ) -> AgentStep:
         return AgentStep(
             node_name=node_name,
             status=status,
             message=message,
             model=self._model_name,
+            prompt_purpose=prompt_purpose,
+            model_mode=model_mode,
             decision_trace=[
                 "Mock mode: deterministic Nemotron-style reasoning.",
                 *decision_trace,
@@ -187,8 +220,8 @@ def build_initial_state(
         "repo_visibility": repo_visibility,
         "demo_mode": demo_mode,
         "status": "started",
-        "nemotron_model": settings.nemotron_fast_model,
-        "mock_mode": True,
+        "nemotron_model": settings.nemotron_model,
+        "mock_mode": settings.mock_mode,
         "blocker_recovered": False,
         "agent_steps": [],
         "graph_trace": [],
@@ -204,11 +237,13 @@ def build_initial_state(
 def build_workflow(
     settings: Settings,
     *,
+    model_client: ModelClient | None = None,
     audit: MockAuditAdapter | None = None,
     retrieval: MockRetrievalAdapter | None = None,
     tools: MockToolAdapter | None = None,
 ):
     active_audit = audit or MockAuditAdapter(model_name=settings.nemotron_fast_model)
+    active_model_client = model_client or _build_default_model_client(settings)
     active_retrieval = retrieval or MockRetrievalAdapter()
     active_tools = tools or MockToolAdapter()
 
@@ -224,6 +259,30 @@ def build_workflow(
             message=message,
             decision_trace=decision_trace,
             status=status,
+        )
+        return {"agent_steps": [step], "graph_trace": [step]}
+
+    def append_model_step(
+        *,
+        node_name: str,
+        message: str,
+        result: ModelCallResult,
+        status: str = "completed",
+        prompt_purpose: str | None = None,
+        extra_trace: list[str] | None = None,
+    ) -> dict[str, list[AgentStep]]:
+        step = AgentStep(
+            node_name=node_name,
+            status=status,
+            message=message,
+            model=result.model,
+            prompt_purpose=prompt_purpose or result.purpose,
+            model_mode=result.mode,
+            decision_trace=[
+                *result.output.decision_trace,
+                *(extra_trace or []),
+            ],
+            timestamp=datetime.now(UTC),
         )
         return {"agent_steps": [step], "graph_trace": [step]}
 
@@ -253,43 +312,47 @@ def build_workflow(
             "memory_matches": memories,
         }
 
-    def scope_mvp(state: WorkflowState) -> dict[str, Any]:
-        scope = {
-            "target_user": "clinic referral coordinator",
-            "must_have": [
-                "intake summary",
-                "blocked referral detection",
-                "next-best follow-up plan",
-            ],
-            "demo_boundary": "single mocked clinic workflow",
-            "mode": "mock",
-        }
+    async def scope_mvp(state: WorkflowState) -> dict[str, Any]:
+        result = await active_model_client.complete_structured(
+            purpose="scope_mvp",
+            model=settings.nemotron_model,
+            prompt=build_scope_mvp_prompt(
+                idea=state["idea"],
+                retrieved_docs=state["retrieved_docs"],
+                memory_matches=state["memory_matches"],
+            ),
+            response_model=MvpScopeOutput,
+            max_tokens=900,
+            reasoning_effort="medium",
+        )
+        scope = result.output.model_dump()
         return {
-            **append_step(
+            **append_model_step(
                 node_name="scope_mvp",
                 message="Scoped the MVP to a judge-friendly referral workflow.",
-                decision_trace=[
-                    "Focused on one healthcare referral pain point.",
-                    "Limited external integrations to mock adapters for Feature 2.",
-                ],
+                result=result,
             ),
             "mvp_scope": scope,
         }
 
-    def plan_repo(state: WorkflowState) -> dict[str, Any]:
-        plan = {
-            "files": ["README.md", "demo_script.md", "pitch.md"],
-            "test_plan": ["unit workflow", "API integration", "mock build verify"],
-            "mode": "mock",
-        }
+    async def plan_repo(state: WorkflowState) -> dict[str, Any]:
+        result = await active_model_client.complete_structured(
+            purpose="plan_repo",
+            model=settings.nemotron_model,
+            prompt=build_plan_repo_prompt(
+                idea=state["idea"],
+                mvp_scope=state.get("mvp_scope", {}),
+            ),
+            response_model=RepoPlanOutput,
+            max_tokens=900,
+            reasoning_effort="medium",
+        )
+        plan = result.output.model_dump()
         return {
-            **append_step(
+            **append_model_step(
                 node_name="plan_repo",
                 message="Planned the generated repository package.",
-                decision_trace=[
-                    "Chose a small artifact set that proves the workflow.",
-                    "Kept generated files deterministic for stable tests.",
-                ],
+                result=result,
             ),
             "repo_plan": plan,
         }
@@ -313,37 +376,39 @@ def build_workflow(
             "last_tool_result": tool_call,
         }
 
-    def generate_files(state: WorkflowState) -> dict[str, Any]:
+    async def generate_files(state: WorkflowState) -> dict[str, Any]:
+        result = await active_model_client.complete_structured(
+            purpose="file_manifest",
+            model=settings.nemotron_fast_model,
+            prompt=build_file_manifest_prompt(
+                idea=state["idea"],
+                repo_plan=state.get("repo_plan", {}),
+            ),
+            response_model=FileManifestOutput,
+            max_tokens=1200,
+            reasoning_effort="low",
+        )
+        manifest = result.output.model_dump()
         artifacts = [
             {
-                "name": "README.md",
-                "kind": "markdown",
-                "mock_mode": True,
-                "summary": "Mock mode: generated setup and referral agent overview.",
-            },
-            {
-                "name": "demo_script.md",
-                "kind": "markdown",
-                "mock_mode": True,
-                "summary": "Mock mode: generated a three-minute demo script.",
-            },
-            {
-                "name": "pitch.md",
-                "kind": "markdown",
-                "mock_mode": True,
-                "summary": "Mock mode: generated a concise hackathon pitch.",
-            },
+                **artifact,
+                "mock_mode": result.mode != "live",
+                "summary": (
+                    artifact["summary"]
+                    if result.mode == "live"
+                    else f"{result.mode.title()} mode: {artifact['summary']}"
+                ),
+            }
+            for artifact in manifest["artifacts"]
         ]
         return {
-            **append_step(
+            **append_model_step(
                 node_name="generate_files",
                 message="Generated README, demo script, and pitch artifacts.",
-                decision_trace=[
-                    "Mapped retrieved context into repo artifacts.",
-                    "Kept content summaries visible instead of writing a real repo.",
-                ],
+                result=result,
             ),
             "generated_artifacts": artifacts,
+            "file_manifest": manifest,
         }
 
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
@@ -380,50 +445,126 @@ def build_workflow(
             "last_tool_result": tool_call,
         }
 
-    def handle_blocker(state: WorkflowState) -> dict[str, Any]:
+    async def handle_blocker(state: WorkflowState) -> dict[str, Any]:
+        result = await active_model_client.complete_structured(
+            purpose="blocker_analysis",
+            model=settings.nemotron_model,
+            prompt=build_blocker_analysis_prompt(
+                idea=state["idea"],
+                tool_result=state.get("last_tool_result", {}),
+            ),
+            response_model=BlockerAnalysisOutput,
+            max_tokens=900,
+            reasoning_effort="medium",
+        )
+        blocker_analysis = result.output.model_dump()
         tool_call = active_tools.recover_build()
         return {
-            **append_step(
+            **append_model_step(
                 node_name="handle_blocker",
                 message="Recovered from the mock build blocker.",
-                decision_trace=[
-                    "Classified the tool failure as recoverable.",
-                    "Applied the smallest deterministic recovery patch.",
-                ],
+                result=result,
             ),
             "blocker_recovered": True,
+            "blocker_analysis": blocker_analysis,
             "tool_calls": [tool_call],
             "last_tool_result": tool_call,
         }
 
-    def generate_final_package(state: WorkflowState) -> dict[str, Any]:
+    async def generate_final_package(state: WorkflowState) -> dict[str, Any]:
+        readme_result = await active_model_client.complete_structured(
+            purpose="final_readme",
+            model=settings.nemotron_model,
+            prompt=build_final_readme_prompt(
+                idea=state["idea"],
+                mvp_scope=state.get("mvp_scope", {}),
+                repo_plan=state.get("repo_plan", {}),
+                generated_artifacts=state["generated_artifacts"],
+            ),
+            response_model=FinalReadmeOutput,
+            max_tokens=1400,
+            reasoning_effort="medium",
+        )
+        demo_result = await active_model_client.complete_structured(
+            purpose="demo_script",
+            model=settings.nemotron_model,
+            prompt=build_demo_script_prompt(
+                idea=state["idea"],
+                blocker_analysis=state.get("blocker_analysis"),
+            ),
+            response_model=DemoScriptOutput,
+            max_tokens=1100,
+            reasoning_effort="medium",
+        )
+        pitch_result = await active_model_client.complete_structured(
+            purpose="pitch",
+            model=settings.nemotron_model,
+            prompt=build_pitch_prompt(
+                idea=state["idea"],
+                final_readme=readme_result.output.model_dump(),
+                demo_script=demo_result.output.model_dump(),
+            ),
+            response_model=PitchOutput,
+            max_tokens=1100,
+            reasoning_effort="medium",
+        )
+        package_mode = _package_mode([readme_result, demo_result, pitch_result])
+        readme = readme_result.output.model_dump()
+        demo_script = demo_result.output.model_dump()
+        pitch = pitch_result.output.model_dump()
         final_report = {
             "status": "completed",
-            "mode": "mock",
-            "model": state["nemotron_model"],
+            "mode": package_mode,
+            "model": settings.nemotron_model,
             "repo": state.get("repo"),
             "summary": (
-                "Mock mode: Person 1 workflow produced a scoped MVP package with "
+                f"{package_mode.title()} mode: Person 1 workflow produced a scoped MVP package with "
                 "retrieval context, generated artifacts, and recovered build proof."
             ),
+            "readme": readme,
+            "demo_script": demo_script,
+            "pitch": pitch,
+            "blocker_analysis": state.get("blocker_analysis"),
             "artifact_count": len(state["generated_artifacts"]) + 1,
         }
         final_artifact = {
             "name": "final_report.json",
             "kind": "json",
-            "mock_mode": True,
-            "summary": "Mock mode: generated final package report.",
+            "mock_mode": package_mode != "live",
+            "summary": f"{package_mode.title()} mode: generated final package report.",
         }
+        combined_result = ModelCallResult(
+            output=pitch_result.output,
+            model=settings.nemotron_model,
+            purpose="final_package",
+            mode=package_mode,
+            latency_ms=(
+                readme_result.latency_ms
+                + demo_result.latency_ms
+                + pitch_result.latency_ms
+            ),
+            fallback_reason=(
+                readme_result.fallback_reason
+                or demo_result.fallback_reason
+                or pitch_result.fallback_reason
+            ),
+        )
         return {
-            **append_step(
+            **append_model_step(
                 node_name="generate_final_package",
                 message="Generated the final package and report.",
-                decision_trace=[
-                    "Collected repo, retrieval, build, and artifact evidence.",
-                    "Labeled the result as mock mode for Feature 2.",
+                result=combined_result,
+                prompt_purpose="final_package",
+                extra_trace=[
+                    "README synthesis completed.",
+                    "Demo script synthesis completed.",
+                    "Pitch synthesis completed.",
                 ],
             ),
             "generated_artifacts": [final_artifact],
+            "final_readme": readme,
+            "demo_script": demo_script,
+            "pitch": pitch,
             "final_report": final_report,
         }
 
@@ -510,6 +651,21 @@ def build_workflow(
     graph.add_edge("report_result", END)
     graph.add_edge("failed", END)
     return graph.compile()
+
+
+def _build_default_model_client(settings: Settings) -> ModelClient:
+    if settings.mock_mode:
+        return DeterministicModelClient(mode="mock")
+    return NemotronModelClient(settings)
+
+
+def _package_mode(results: list[ModelCallResult]) -> Literal["mock", "live", "fallback"]:
+    modes = {result.mode for result in results}
+    if "fallback" in modes:
+        return "fallback"
+    if modes == {"live"}:
+        return "live"
+    return "mock"
 
 
 def route_after_tool_result(state: dict[str, Any]) -> str:

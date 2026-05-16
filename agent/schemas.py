@@ -49,6 +49,8 @@ class AgentStep(BaseModel):
     status: str
     message: str
     model: str | None = None
+    prompt_purpose: str | None = None
+    model_mode: Literal["mock", "live", "fallback"] | None = None
     decision_trace: list[str] = Field(default_factory=list)
     timestamp: datetime
 

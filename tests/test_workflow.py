@@ -62,8 +62,27 @@ async def test_full_workflow_completes_with_expected_timeline():
         "pitch.md",
         "final_report.json",
     }
-    assert all(step.model == settings.nemotron_fast_model for step in detail.agent_steps)
+    model_backed_steps = {
+        step.node_name: step
+        for step in detail.agent_steps
+        if step.prompt_purpose is not None
+    }
+    assert set(model_backed_steps) == {
+        "scope_mvp",
+        "plan_repo",
+        "generate_files",
+        "handle_blocker",
+        "generate_final_package",
+    }
+    assert model_backed_steps["scope_mvp"].model == settings.nemotron_model
+    assert model_backed_steps["plan_repo"].model == settings.nemotron_model
+    assert model_backed_steps["generate_files"].model == settings.nemotron_fast_model
+    assert all(step.model_mode == "mock" for step in model_backed_steps.values())
     assert all(step.decision_trace for step in detail.agent_steps)
+    assert detail.final_report["readme"]["content"]
+    assert detail.final_report["demo_script"]["content"]
+    assert detail.final_report["pitch"]["content"]
+    assert detail.final_report["blocker_analysis"]["recoverable"] is True
 
 
 def test_route_after_tool_result_continues_after_success():
