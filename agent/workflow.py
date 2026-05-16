@@ -212,7 +212,6 @@ def build_workflow(
             prompt=build_scope_mvp_prompt(
                 idea=state["idea"],
                 build_context=state.get("build_context", {}),
-                retrieved_docs=state["retrieved_docs"],
                 memory_matches=state["memory_matches"],
             ),
             response_model=MvpScopeOutput,

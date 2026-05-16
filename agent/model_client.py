@@ -435,9 +435,11 @@ def _deterministic_payload(
     prompt: str,
 ) -> dict:
     idea = _extract_idea(prompt)
+    if purpose == "plan_repo":
+        return _repo_plan_payload(mode, fallback_reason, idea, prompt)
+
     payloads = {
         "scope_mvp": _scope_payload,
-        "plan_repo": _repo_plan_payload,
         "file_manifest": _file_manifest_payload,
         "blocker_analysis": _blocker_analysis_payload,
         "final_readme": _final_readme_payload,
@@ -473,12 +475,19 @@ def _scope_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> d
     ).model_dump()
 
 
-def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:
+def _repo_plan_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    prompt: str,
+) -> dict:
     label = _idea_label(idea)
+    resolved_stack = _extract_resolved_stack_summary(prompt)
     return RepoPlanOutput(
         files=["README.md", "demo_script.md", "pitch.md"],
         test_plan=["unit workflow", "API integration", "mock build verify"],
         architecture_notes=[
+            f"Use resolvedTechStack for generated files, tests, and architecture: {resolved_stack}.",
             "Keep model calls behind a client protocol.",
             "Keep GitHub and build actions behind mockable tool adapters.",
         ],
@@ -493,6 +502,28 @@ def _repo_plan_payload(mode: ModelMode, fallback_reason: str | None, idea: str) 
             ],
         ),
     ).model_dump()
+
+
+def _extract_resolved_stack_summary(prompt: str) -> str:
+    marker = "Resolved tech stack:\n"
+    if marker not in prompt:
+        return "the resolved MVPilot stack from build context"
+
+    raw_block = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+    try:
+        payload = json.loads(raw_block)
+    except json.JSONDecodeError:
+        return "the resolved MVPilot stack from build context"
+
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return "the resolved MVPilot stack from build context"
+
+    stack_items = [item for item in items if isinstance(item, str) and item.strip()]
+    if not stack_items:
+        return "the resolved MVPilot stack from build context"
+
+    return ", ".join(stack_items)
 
 
 def _file_manifest_payload(mode: ModelMode, fallback_reason: str | None, idea: str) -> dict:

@@ -12,18 +12,22 @@ def build_scope_mvp_prompt(
     *,
     idea: str,
     build_context: dict[str, Any],
-    retrieved_docs: list[dict[str, Any]],
     memory_matches: list[dict[str, Any]],
+    retrieved_docs: list[dict[str, Any]] | None = None,
 ) -> str:
+    del retrieved_docs
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Scope this hackathon idea into one demo-ready MVP.\n\n"
         f"Idea:\n{idea}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Structured build context (highest priority — follow critical items first):\n"
         f"{_json_block(build_context)}\n\n"
-        f"Retrieved docs:\n{_json_block(retrieved_docs)}\n\n"
         f"Memory matches:\n{_json_block(memory_matches)}\n\n"
+        "Use resolvedTechStack as the stack decision. "
+        "required stack items override MVPilot defaults. "
         "Honor required deliverables, allowed tools/APIs, repository format, demo format, "
-        "tech stack pieces, and scope warnings from build context. "
+        "resolved tech stack, and scope warnings from build context. "
         "Return target user, must-have features, demo boundary, mode, and a short decision trace."
     )
 
@@ -34,11 +38,16 @@ def build_plan_repo_prompt(
     mvp_scope: dict[str, Any],
     build_context: dict[str, Any],
 ) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
     return (
         "Plan the smallest generated repository package for this MVP.\n\n"
         f"Idea:\n{idea}\n\n"
         f"MVP scope:\n{_json_block(mvp_scope)}\n\n"
+        f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Structured build context:\n{_json_block(build_context)}\n\n"
+        "Use resolvedTechStack as the binding stack decision; "
+        "required stack items override MVPilot defaults. "
+        "generated files, tests, and architecture must match resolvedTechStack. "
         "Align files and layout with requiredRepositoryFormat and allowedToolsAndAPIs. "
         "Return files, test plan, architecture notes, mode, and decision trace."
     )

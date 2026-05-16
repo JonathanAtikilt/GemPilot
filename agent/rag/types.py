@@ -30,6 +30,13 @@ BuildContextResponseCategory = Literal[
     "requiredTechStackPieces",
 ]
 
+ResolvedTechStackSource = Literal[
+    "rag_required",
+    "request_preference",
+    "default",
+    "mixed",
+]
+
 
 class SourceDocument(BaseModel):
     source: str
@@ -157,11 +164,20 @@ class EvidenceItem(BaseModel):
     score: float
 
 
+class ResolvedTechStack(BaseModel):
+    source: ResolvedTechStackSource
+    items: list[str]
+    requiredItems: list[str]
+    defaultItems: list[str]
+    reason: str
+
+
 class BuildContextResponse(BaseModel):
     requiredDeliverables: list[BuildContextItem]
     allowedToolsAndAPIs: list[BuildContextItem]
     requiredRepositoryFormat: list[BuildContextItem]
     requiredDemoFormat: list[BuildContextItem]
     requiredTechStackPieces: list[BuildContextItem]
+    resolvedTechStack: ResolvedTechStack
     scopeWarnings: list[ScopeWarningItem]
     evidence: list[EvidenceItem]
