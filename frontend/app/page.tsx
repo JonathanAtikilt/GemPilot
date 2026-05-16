@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
-type StepStatus = "Ready" | "Running" | "Waiting" | "Pending" | "Complete";
+type StepStatus = "Ready" | "Running" | "Pending" | "Complete" | "Failed";
 type AdditionalSourceType = "url" | "file";
 
 type AgentStep = {
@@ -19,17 +19,16 @@ type AdditionalSource =
 const defaultTitle = "Healthcare Referral Coordinator";
 const defaultIdea = "Build a healthcare referral coordination agent that helps clinics prevent failed referrals.";
 
-const baseSteps: AgentStep[] = [
-  { phase: "Observe", title: "Receive messy idea", detail: "Capture the user idea, GitHub connection, primary rules URL, and any extra source material.", status: "Ready" },
-  { phase: "Retrieve", title: "Read source material", detail: "RAG agent retrieves hackathon rules, judging criteria, NVIDIA docs, uploaded files, and additional URLs.", status: "Pending" },
-  { phase: "Reason", title: "Scope the MVP", detail: "Nemotron turns the broad idea into a realistic hackathon build plan.", status: "Pending" },
-  { phase: "Act", title: "Create repo and generate files", detail: "OpenClaw coordinates GitHub setup, code generation, commits, and build logs.", status: "Pending" },
-  { phase: "Verify", title: "Check generated project", detail: "Agent detects blockers, verifies routes, and confirms the demo path works.", status: "Pending" },
-  { phase: "Remember", title: "Store build decisions", detail: "RAG and memory store useful choices, blockers, fixes, and final project state.", status: "Pending" },
-  { phase: "Report", title: "Generate demo package", detail: "Agent creates the README, demo script, pitch, limitations, and next steps.", status: "Pending" },
+const flightStops: AgentStep[] = [
+  { phase: "PREFLIGHT", title: "Capture brief", detail: "Package the title, idea, GitHub authorization, rules URL, and extra source material.", status: "Ready" },
+  { phase: "RAG SCAN", title: "Retrieve rules", detail: "Index hackathon rules, NVIDIA docs, uploaded files, and additional URLs.", status: "Pending" },
+  { phase: "SCOPE", title: "Plan MVP", detail: "Nemotron narrows the broad idea into a realistic hackathon build.", status: "Pending" },
+  { phase: "SYNTH", title: "Generate repo", detail: "OpenClaw coordinates repo creation, code generation, commits, and build logs.", status: "Pending" },
+  { phase: "QA", title: "Verify build", detail: "The agent detects blockers, verifies outputs, and records fixes.", status: "Pending" },
+  { phase: "LANDING", title: "Deliver MVP", detail: "Final README, demo script, pitch, and GitHub repo are ready for review.", status: "Pending" },
 ];
 
-const demoSources = [
+const sourceTypes = [
   "Primary hackathon rules URL",
   "Additional OpenClaw or Nemotron documentation URLs",
   "Optional uploaded README, PDF, TXT, or Markdown files",
@@ -48,18 +47,28 @@ function readGithubAuthCode() {
 
 function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    Ready: "border-slate-200 bg-slate-50 text-slate-600",
-    Running: "border-cyan-200 bg-cyan-50 text-cyan-700",
-    Waiting: "border-amber-200 bg-amber-50 text-amber-700",
-    Pending: "border-slate-200 bg-slate-50 text-slate-600",
-    Complete: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    Failed: "border-rose-200 bg-rose-50 text-rose-700",
+    Ready: "border-[#3a494b] bg-[#1c1f29] text-[#b9cacb]",
+    Running: "border-[#00f2ff]/40 bg-[#00f2ff]/10 text-[#00f2ff] shadow-[0_0_12px_rgba(0,242,255,0.18)]",
+    Pending: "border-[#3a494b] bg-[#181b25] text-[#849495]",
+    Complete: "border-[#4edea3]/40 bg-[#4edea3]/10 text-[#4edea3] shadow-[0_0_12px_rgba(78,222,163,0.18)]",
+    Failed: "border-[#ffb4ab]/50 bg-[#93000a]/40 text-[#ffb4ab]",
   };
 
   return (
-    <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${styles[status] ?? styles.Pending}`}>
+    <span className={`rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest ${styles[status] ?? styles.Pending}`}>
       {status}
     </span>
+  );
+}
+
+function PlaneMarker({ progress }: { progress: number }) {
+  return (
+    <div className="absolute top-0 z-20 -translate-x-1/2 transition-all duration-700" style={{ left: `${progress}%` }}>
+      <div className="flex items-center gap-1 rounded-full border border-[#00f2ff]/50 bg-[#00f2ff] px-2 py-1 text-[10px] font-black tracking-widest text-[#00363a] shadow-[0_0_18px_rgba(0,242,255,0.55)]">
+        <span className="h-0 w-0 border-y-[5px] border-l-[9px] border-y-transparent border-l-[#00363a]" />
+        MVP
+      </div>
+    </div>
   );
 }
 
@@ -70,10 +79,11 @@ export default function Home() {
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
   const [githubAuthCode, setGithubAuthCode] = useState<string | null>(null);
-  const [githubMessage, setGithubMessage] = useState("Connect GitHub so the agent can create or update a repo after backend token exchange.");
+  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo after backend token exchange.");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [repoUrl, setRepoUrl] = useState<string | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "sent" | "mocked" | "error">("idle");
-  const [message, setMessage] = useState("Ready to send an idea and source material to the orchestrator.");
+  const [message, setMessage] = useState("Ready for preflight. Add the build brief and launch MVPilot.");
 
   useEffect(() => {
     Promise.resolve().then(() => {
@@ -110,18 +120,26 @@ export default function Home() {
     [additionalSources, githubAuthCode, idea, primaryRulesUrl, projectTitle],
   );
 
-  const steps = baseSteps.map((step, index) => {
-    if (submitState === "idle") return step;
-    if (index === 0) return { ...step, status: "Complete" as StepStatus };
-    if (index === 1) return { ...step, status: "Running" as StepStatus };
-    return step;
+  const hasLaunched = submitState !== "idle" && submitState !== "error";
+  const progressPercent = submitState === "sent" ? 58 : hasLaunched ? 34 : 0;
+  const activeStopIndex = submitState === "sent" ? 3 : hasLaunched ? 1 : 0;
+  const completedStops = submitState === "sent" ? 3 : hasLaunched ? 1 : 0;
+  const additionalUrlCount = payloadPreview.additional_urls.length;
+  const additionalFileCount = payloadPreview.additional_files.length;
+
+  const steps = flightStops.map((step, index) => {
+    if (submitState === "error" && index === 0) return { ...step, status: "Failed" as StepStatus };
+    if (!hasLaunched && index === 0) return { ...step, status: "Ready" as StepStatus };
+    if (index < completedStops) return { ...step, status: "Complete" as StepStatus };
+    if (index === activeStopIndex) return { ...step, status: "Running" as StepStatus };
+    return { ...step, status: "Pending" as StepStatus };
   });
 
   function connectGitHub() {
     const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
 
     if (!clientId) {
-      setGithubMessage("Missing NEXT_PUBLIC_GITHUB_CLIENT_ID. Create a GitHub OAuth App, add the client ID to .env.local, then restart npm run dev.");
+      setGithubMessage("Missing NEXT_PUBLIC_GITHUB_CLIENT_ID. Add the client ID to .env.local, then restart npm run dev.");
       return;
     }
 
@@ -185,7 +203,7 @@ export default function Home() {
     }
 
     setSubmitState("sending");
-    setMessage("Sending idea and source material to Person 1's agent endpoint...");
+    setMessage("Flight plan filed. Sending the build brief to Person 1's orchestrator...");
 
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
 
@@ -193,7 +211,7 @@ export default function Home() {
       const mockTaskId = `mock-${Date.now()}`;
       setTaskId(mockTaskId);
       setSubmitState("mocked");
-      setMessage("No backend URL is configured yet, so the UI created a mock task. Add NEXT_PUBLIC_AGENT_API_URL when Person 1's FastAPI service is ready.");
+      setMessage("No backend URL is configured yet, so MVPilot is showing a mock flight path. Add NEXT_PUBLIC_AGENT_API_URL when Person 1's FastAPI service is ready.");
       return;
     }
 
@@ -229,8 +247,9 @@ export default function Home() {
 
       const data = await response.json();
       setTaskId(data.task_id ?? data.id ?? "sent-without-task-id");
+      setRepoUrl(data.repo_url ?? data.github_repo_url ?? null);
       setSubmitState("sent");
-      setMessage("Idea sent to the orchestrator. Next step: subscribe to task updates from Supabase or poll GET /agent/tasks/{task_id}.");
+      setMessage("MVPilot is airborne. Next step: subscribe to task updates or poll GET /agent/tasks/{task_id}.");
     } catch (error) {
       setSubmitState("error");
       setMessage(error instanceof Error ? error.message : "Could not reach the agent endpoint.");
@@ -238,166 +257,230 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f7f9] text-slate-950">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
+    <main className="min-h-screen bg-[#0a0e17] text-[#dfe2ef] [background-image:linear-gradient(rgba(0,242,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,242,255,0.03)_1px,transparent_1px)] [background-size:20px_20px]">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-5 py-5 lg:px-8">
+        <header className="flex h-auto flex-col gap-4 border-b border-[#3a494b]/50 bg-[#0f131c]/80 pb-5 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">MVPilot Mission Control</p>
-            <h1 className="mt-2 text-3xl font-bold tracking-normal text-slate-950 lg:text-4xl">
-              Turn a messy hackathon idea into a working MVP
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[#00f2ff]/30 bg-[#00f2ff]/10 font-mono text-sm font-black text-[#00f2ff] shadow-[0_0_15px_rgba(0,242,255,0.16)]">MP</div>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">Mission Control</p>
+            </div>
+            <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-normal text-[#e1fdff] lg:text-5xl">
+              MVPilot Flight Control
             </h1>
-            <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">
-              Enter an idea, connect GitHub, and add source material. The frontend packages that request for the OpenClaw + Nemotron orchestrator, then shows the autonomous build workflow as it creates the repo, scopes the MVP, logs progress, fixes blockers, and prepares the demo.
+            <p className="mt-3 max-w-3xl text-base leading-7 text-[#b9cacb]">
+              File a build brief, connect GitHub, and fly the project through retrieval, scoping, repo synthesis, verification, and final delivery.
             </p>
           </div>
-          <div className="w-full rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:w-[360px]">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Agent Handoff</p>
-            <p className="mt-2 text-lg font-semibold text-slate-950">POST /agent/run</p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">This page sends the idea, GitHub authorization code, primary URL, and optional sources once Person 1&apos;s FastAPI backend is running.</p>
+          <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-4 backdrop-blur-xl">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">System</p>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="h-2.5 w-2.5 rounded-full bg-[#4edea3] shadow-[0_0_10px_rgba(78,222,163,0.9)]" />
+              <p className="font-mono text-sm font-semibold text-[#4edea3]">FRONTEND STABLE</p>
+            </div>
+            <p className="mt-2 font-mono text-xs text-[#b9cacb]">Task: {taskId ? taskId : "NOT LAUNCHED"}</p>
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[0.95fr_1.25fr]">
-          <form onSubmit={handleSubmit} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">Idea Intake</h2>
-                <p className="mt-1 text-sm text-slate-600">This is the information you send to the agent brain.</p>
-              </div>
-              <StatusPill status={submitState === "sending" ? "Running" : submitState === "error" ? "Failed" : taskId ? "Complete" : "Ready"} />
-            </div>
+        <section className="overflow-hidden rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+          <div className="relative min-h-[560px] p-5 lg:p-7">
+            <div className="pointer-events-none absolute -left-48 -top-72 h-[620px] w-[620px] rounded-full bg-[conic-gradient(from_0deg_at_50%_50%,rgba(0,242,255,0.12)_0deg,transparent_90deg)]" />
 
-            <label className="mt-5 block text-sm font-semibold text-slate-800" htmlFor="project-title">Project title</label>
-            <input id="project-title" type="text" required value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} placeholder="Healthcare Referral Coordinator" className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
+            {!hasLaunched ? (
+              <form onSubmit={handleSubmit} className="relative z-10 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+                <section className="rounded-lg border border-[#00f2ff]/15 bg-[#0f131c]/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Preflight Brief</p>
+                      <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#dfe2ef]">Launch Parameters</h2>
+                    </div>
+                    <StatusPill status={submitState === "error" ? "Failed" : "Ready"} />
+                  </div>
 
-            <label className="mt-4 block text-sm font-semibold text-slate-800" htmlFor="idea">Project idea</label>
-            <textarea id="idea" value={idea} onChange={(event) => setIdea(event.target.value)} rows={4} className="mt-2 w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
+                  <label className="mt-5 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="project-title">Project title</label>
+                  <input id="project-title" type="text" required value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} placeholder="Healthcare Referral Coordinator" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
-            <section className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">GitHub connection</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">The backend exchanges the temporary code for an access token. No GitHub secret is stored in the browser.</p>
-                </div>
-                {githubAuthCode ? (
-                  <button type="button" onClick={disconnectGitHub} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white">Disconnect</button>
-                ) : (
-                  <button type="button" onClick={connectGitHub} className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">Connect GitHub</button>
-                )}
-              </div>
-              <div className="mt-3 flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
-                <p className="text-sm leading-6 text-slate-600">{githubMessage}</p>
-                <StatusPill status={githubAuthCode ? "Complete" : "Ready"} />
-              </div>
-            </section>
+                  <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="idea">Project idea</label>
+                  <textarea id="idea" value={idea} onChange={(event) => setIdea(event.target.value)} rows={4} className="mt-2 w-full resize-none rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
-            <label className="mt-4 block text-sm font-semibold text-slate-800" htmlFor="primary-rules-url">Primary rules URL</label>
-            <input id="primary-rules-url" type="url" required value={primaryRulesUrl} onChange={(event) => setPrimaryRulesUrl(event.target.value)} placeholder="https://example.com/hackathon-rules" className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
-
-            <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">Additional information</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">Add extra URLs or files only when the agent needs more context.</p>
-                </div>
-                <div className="flex gap-2">
-                  <select value={nextSourceType} onChange={(event) => setNextSourceType(event.target.value as AdditionalSourceType)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100">
-                    <option value="url">URL</option>
-                    <option value="file">File</option>
-                  </select>
-                  <button type="button" onClick={addSource} className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800" aria-label="Add additional source">+</button>
-                </div>
-              </div>
-
-              {additionalSources.length > 0 && (
-                <div className="mt-3 grid gap-3">
-                  {additionalSources.map((source) => (
-                    <div key={source.id} className="rounded-md border border-slate-200 bg-white p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-cyan-700">Additional {source.type === "url" ? "URL" : "file"}</p>
-                        <button type="button" onClick={() => removeSource(source.id)} className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100">Remove</button>
+                  <section className="mt-5 rounded-lg border border-[#3a494b]/70 bg-[#1c1f29]/70 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">GitHub Link</p>
+                        <p className="mt-1 text-sm leading-5 text-[#b9cacb]">Backend exchanges the temporary code. No GitHub secret is stored in the browser.</p>
                       </div>
-                      {source.type === "url" ? (
-                        <input type="url" value={source.value} onChange={(event) => updateAdditionalUrl(source.id, event.target.value)} placeholder="https://example.com/extra-docs" className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100" />
+                      {githubAuthCode ? (
+                        <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
-                        <input type="file" accept=".pdf,.md,.txt,.doc,.docx,.json,.csv" onChange={(event) => updateAdditionalFile(source.id, event)} className="mt-2 w-full rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-slate-950 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" />
-                      )}
-                      {source.type === "file" && source.file && (
-                        <p className="mt-2 text-xs text-slate-500">{source.file.name} ({Math.ceil(source.file.size / 1024)} KB)</p>
+                        <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect</button>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    <div className="mt-3 flex items-start justify-between gap-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">
+                      <p className="text-sm leading-6 text-[#b9cacb]">{githubMessage}</p>
+                      <StatusPill status={githubAuthCode ? "Complete" : "Ready"} />
+                    </div>
+                  </section>
 
-            <button type="submit" disabled={submitState === "sending"} className="mt-5 w-full rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">
-              {submitState === "sending" ? "Sending to Agent..." : "Start MVPilot Run"}
-            </button>
+                  <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="primary-rules-url">Primary rules URL</label>
+                  <input id="primary-rules-url" type="url" required value={primaryRulesUrl} onChange={(event) => setPrimaryRulesUrl(event.target.value)} placeholder="https://example.com/hackathon-rules" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
-            <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{message}</p>
-          </form>
+                  <div className="mt-5 rounded-lg border border-[#3a494b]/70 bg-[#1c1f29]/70 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]">Additional sources</p>
+                        <p className="mt-1 text-sm leading-5 text-[#849495]">Add extra URLs or files only when the agent needs more context.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <select value={nextSourceType} onChange={(event) => setNextSourceType(event.target.value as AdditionalSourceType)} className="rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#dfe2ef] outline-none focus:border-[#00f2ff]">
+                          <option value="url">URL</option>
+                          <option value="file">File</option>
+                        </select>
+                        <button type="button" onClick={addSource} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-black text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]" aria-label="Add additional source">+</button>
+                      </div>
+                    </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">Autonomous Workflow</h2>
-                <p className="mt-1 text-sm text-slate-600">Mapped from the repo docs: idea input, RAG, scoping, repo creation, commits, fixes, and final pitch.</p>
-              </div>
-              <StatusPill status={taskId ? "Running" : "Ready"} />
-            </div>
-
-            <div className="mt-5 grid gap-3">
-              {steps.map((step, index) => (
-                <div key={step.phase} className="grid gap-3 rounded-lg border border-slate-200 p-4 sm:grid-cols-[42px_110px_1fr_auto] sm:items-start">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-sm font-bold text-white">{index + 1}</div>
-                  <p className="text-sm font-semibold text-cyan-700">{step.phase}</p>
-                  <div>
-                    <p className="font-semibold text-slate-950">{step.title}</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{step.detail}</p>
+                    {additionalSources.length > 0 && (
+                      <div className="mt-3 grid gap-3">
+                        {additionalSources.map((source) => (
+                          <div key={source.id} className="rounded border border-[#3a494b] bg-[#0a0e17] p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff]">Additional {source.type}</p>
+                              <button type="button" onClick={() => removeSource(source.id)} className="rounded border border-[#3a494b] px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb] transition hover:border-[#00f2ff]/50">Remove</button>
+                            </div>
+                            {source.type === "url" ? (
+                              <input type="url" value={source.value} onChange={(event) => updateAdditionalUrl(source.id, event.target.value)} placeholder="https://example.com/extra-docs" className="mt-2 w-full rounded border border-[#3a494b] bg-[#181b25] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                            ) : (
+                              <input type="file" accept=".pdf,.md,.txt,.doc,.docx,.json,.csv" onChange={(event) => updateAdditionalFile(source.id, event)} className="mt-2 w-full rounded border border-dashed border-[#3a494b] bg-[#181b25] px-3 py-3 text-sm text-[#b9cacb] file:mr-4 file:rounded file:border-0 file:bg-[#00f2ff] file:px-3 file:py-2 file:font-mono file:text-xs file:font-bold file:uppercase file:tracking-widest file:text-[#00363a]" />
+                            )}
+                            {source.type === "file" && source.file && (
+                              <p className="mt-2 font-mono text-xs text-[#849495]">{source.file.name} ({Math.ceil(source.file.size / 1024)} KB)</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <StatusPill status={step.status} />
+
+                  <button type="submit" className="mt-5 w-full rounded bg-[#00f2ff] px-4 py-3 font-mono text-xs font-black uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_18px_rgba(0,242,255,0.35)] disabled:cursor-not-allowed disabled:bg-[#31353f] disabled:text-[#849495]">
+                    Launch MVPilot
+                  </button>
+
+                  <p className="mt-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs leading-5 text-[#b9cacb]">{message}</p>
+                </section>
+
+                <section className="relative min-h-[500px] overflow-hidden rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/50 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                  <div className="absolute inset-0 opacity-70 [background-image:linear-gradient(rgba(0,242,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(0,242,255,0.04)_1px,transparent_1px)] [background-size:20px_20px]" />
+                  <div className="relative z-10">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Flight Path</p>
+                    <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">Parameters staged on runway</h2>
+                    <p className="mt-2 max-w-xl text-sm leading-6 text-[#b9cacb]">After launch, this panel becomes the live checkpoint bar. The plane advances as the Person 1 orchestrator reports progress.</p>
+                  </div>
+                  <div className="absolute left-8 right-8 top-1/2 h-px bg-[#3a494b]" />
+                  <div className="absolute left-8 right-8 top-1/2 flex -translate-y-1/2 justify-between">
+                    {flightStops.map((stop) => (
+                      <div key={stop.phase} className="flex flex-col items-center gap-3">
+                        <div className="h-4 w-4 rounded-full border-4 border-[#0f131c] bg-[#31353f]" />
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#849495]">{stop.phase}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <PlaneMarker progress={2} />
+                </section>
+              </form>
+            ) : (
+              <section className="relative z-10 grid gap-5">
+                <div className="rounded-lg border border-[#00f2ff]/15 bg-[#0f131c]/85 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Autopilot Active</p>
+                      <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">{payloadPreview.title}</h2>
+                      <p className="mt-2 max-w-3xl font-mono text-xs leading-5 text-[#b9cacb]">{message}</p>
+                    </div>
+                    <div className="text-left lg:text-right">
+                      <p className="font-mono text-4xl font-bold text-[#00f2ff]">{progressPercent}%</p>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">Completion</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-12 overflow-x-auto px-2 pb-5 pt-12">
+                    <div className="relative min-w-[900px]">
+                      <div className="absolute left-0 right-0 top-8 h-0.5 bg-[#3a494b]" />
+                      <div className="absolute left-0 top-8 h-0.5 bg-[#4edea3] shadow-[0_0_10px_rgba(78,222,163,0.65)] transition-all duration-700" style={{ width: `calc(${progressPercent}% - 12px)` }} />
+                      <PlaneMarker progress={progressPercent} />
+                      <div className="grid grid-cols-6 gap-4">
+                        {steps.map((step) => (
+                          <div key={step.phase} className="relative flex flex-col items-center pt-3 text-center">
+                            <div className={`z-10 h-5 w-5 rounded-full border-4 border-[#0f131c] ${step.status === "Complete" ? "bg-[#4edea3] shadow-[0_0_12px_rgba(78,222,163,0.65)]" : step.status === "Running" ? "bg-[#00f2ff] shadow-[0_0_20px_rgba(0,242,255,0.7)]" : "bg-[#31353f]"}`} />
+                            <p className={`mt-4 font-mono text-[11px] font-bold uppercase tracking-widest ${step.status === "Running" ? "text-[#00f2ff]" : step.status === "Complete" ? "text-[#4edea3]" : "text-[#849495]"}`}>{step.phase}</p>
+                            <p className="mt-1 text-xs leading-5 text-[#b9cacb]">{step.title}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="grid gap-5 lg:grid-cols-3">
+                  <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Radar Evidence</p>
+                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Source manifest</h3>
+                    <div className="mt-4 grid gap-2 font-mono text-xs text-[#b9cacb]">
+                      <p>Primary URL: {primaryRulesUrl}</p>
+                      <p>Extra URLs: {additionalUrlCount}</p>
+                      <p>Extra files: {additionalFileCount}</p>
+                      <p>GitHub: {githubAuthCode ? "CONNECTED" : "NOT CONNECTED"}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Active Stop</p>
+                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{steps[activeStopIndex].title}</h3>
+                    <p className="mt-3 text-sm leading-6 text-[#b9cacb]">{steps[activeStopIndex].detail}</p>
+                  </div>
+
+                  <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Landing Zone</p>
+                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{repoUrl ? "GitHub repo ready" : "GitHub repo pending"}</h3>
+                    {repoUrl ? (
+                      <a href={repoUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-black uppercase tracking-widest text-[#00363a]">Open repo</a>
+                    ) : (
+                      <p className="mt-3 text-sm leading-6 text-[#b9cacb]">When Person 1 returns repo_url, this card links to the generated project, README, demo script, and pitch.</p>
+                    )}
+                    {taskId && <p className="mt-4 rounded border border-[#00f2ff]/20 bg-[#00f2ff]/10 px-3 py-2 font-mono text-xs font-bold text-[#00f2ff]">Task ID: {taskId}</p>}
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-3">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">Request Payload</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">Sent To Person 1</h2>
-            <pre className="mt-3 max-h-72 overflow-auto rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(payloadPreview, null, 2)}</pre>
+        <section className="grid gap-5 lg:grid-cols-3">
+          <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Run Summary</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{payloadPreview.title}</h2>
+            <p className="mt-3 text-sm leading-6 text-[#b9cacb]">{idea}</p>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">RAG Inputs</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">Allowed Source Material</h2>
+          <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">RAG Inputs</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Allowed source material</h2>
             <div className="mt-3 grid gap-2">
-              {demoSources.map((source) => (
-                <div key={source} className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700">{source}</div>
+              {sourceTypes.map((source) => (
+                <div key={source} className="rounded border border-[#3a494b] bg-[#0f131c] px-3 py-2 text-sm text-[#b9cacb]">{source}</div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">Integration Contract</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">What You Need From Person 1</h2>
-            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-              <p>Backend URL for NEXT_PUBLIC_AGENT_API_URL.</p>
-              <p>GitHub OAuth app client ID for NEXT_PUBLIC_GITHUB_CLIENT_ID.</p>
-              <p>POST /agent/run accepts multipart form data with title, idea, github_auth_code, primary_rules_url, additional_urls, additional_files, and source.</p>
-              <p>Person 1&apos;s backend exchanges github_auth_code for a GitHub token using the OAuth app client secret.</p>
-              <p>Response returns task_id so the UI can display live progress.</p>
+          <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Person 1 Handoff</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Payload unchanged</h2>
+            <div className="mt-3 space-y-2 text-sm leading-6 text-[#b9cacb]">
+              <p>POST /agent/run receives title, idea, github_auth_code, primary_rules_url, additional_urls, additional_files, and source.</p>
+              <p>Backend returns task_id and can later return repo_url for the landing zone.</p>
             </div>
-            {taskId && <p className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-700">Task ID: {taskId}</p>}
           </div>
         </section>
       </div>
     </main>
   );
 }
-
-
-
-
