@@ -5,6 +5,7 @@ from functools import lru_cache
 from fastapi import Request
 
 from agent.config import Settings
+from agent.github_oauth import GitHubConnectionService
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
 
@@ -24,3 +25,7 @@ def get_task_store(request: Request) -> InMemoryTaskStore:
 
 def get_agent_service(request: Request) -> AgentService:
     return request.app.state.agent_service
+
+
+def get_github_connection_service(request: Request) -> GitHubConnectionService:
+    return request.app.state.github_connection_service

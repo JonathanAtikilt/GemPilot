@@ -30,7 +30,12 @@ def _mock_verify_commit(repo_name: str, commit_sha: str) -> ToolResult:
     )
 
 
-def verify_commit(repo_name: str, commit_sha: str) -> dict:
+def verify_commit(
+    repo_name: str,
+    commit_sha: str,
+    *,
+    config: GitHubConfig | None = None,
+) -> dict:
     """Confirm a commit exists in the generated repository and list changed files."""
 
     repo_error = validate_generated_repo_name(repo_name)
@@ -40,11 +45,11 @@ def verify_commit(repo_name: str, commit_sha: str) -> dict:
     if not commit_sha.strip():
         return ToolResult.failure("github.verify_commit", "Commit SHA must not be empty.").model_dump(mode="json")
 
-    config = GitHubConfig.from_env()
-    if config.mock_tools or not config.token:
+    active_config = config or GitHubConfig.from_env()
+    if active_config.mock_tools or not active_config.token:
         return _mock_verify_commit(repo_name, commit_sha).model_dump(mode="json")
 
-    client = GitHubClient(config)
+    client = GitHubClient(active_config)
     try:
         commit = client.get_commit(repo_name, commit_sha)
         files_changed = [file_info["filename"] for file_info in commit.get("files", []) if "filename" in file_info]

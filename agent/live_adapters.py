@@ -8,6 +8,7 @@ from agent.rag.build_context import get_build_context
 from agent.rag.retrieve import search_rag
 from agent.rag.types import BuildContextOptionalParams
 from tools.github_tool import create_repo, commit_files
+from tools.github_tool import GitHubConfig
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
 from tools.verifier import verify_commit
@@ -75,11 +76,18 @@ class LiveRagMemoryAdapter:
 
 
 class LiveToolAdapter:
+    def __init__(self, github_config: GitHubConfig | None = None) -> None:
+        self._github_config = github_config
+
+    def set_github_config(self, config: GitHubConfig) -> None:
+        self._github_config = config
+
     def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]:
         raw_result = create_repo(
             repo_name=f"mvpilot-generated-{task_id[:8]}",
             description="Generated MVP",
-            visibility=visibility
+            visibility=visibility,
+            config=self._github_config,
         )
         output = raw_result.get("output", {})
         return {
@@ -101,7 +109,12 @@ class LiveToolAdapter:
         }
 
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]:
-        raw_result = commit_files(repo_name=repo_name, files=files, message=message)
+        raw_result = commit_files(
+            repo_name=repo_name,
+            files=files,
+            message=message,
+            config=self._github_config,
+        )
         output = raw_result.get("output", {})
         return {
             "tool": raw_result.get("tool_name", "github.commit_files"),
@@ -120,7 +133,7 @@ class LiveToolAdapter:
         }
 
     def check_repo_health(self, repo_name: str) -> dict[str, Any]:
-        raw_result = check_repo_health(repo_name)
+        raw_result = check_repo_health(repo_name, config=self._github_config)
         output = raw_result.get("output", {})
         return {
             "tool": raw_result.get("tool_name", "github.check_repo_health"),
@@ -157,7 +170,7 @@ class LiveToolAdapter:
         }
 
     def verify_commit(self, repo_name: str, commit_sha: str) -> dict[str, Any]:
-        raw_result = verify_commit(repo_name, commit_sha)
+        raw_result = verify_commit(repo_name, commit_sha, config=self._github_config)
         output = raw_result.get("output", {})
         return {
             "tool": raw_result.get("tool_name", "github.verify_commit"),
@@ -176,22 +189,30 @@ class LiveToolAdapter:
             "raw_result": raw_result,
         }
 
-    def verify_build(self, recovered: bool) -> dict[str, Any]:
-        # Return mock shape or call live build verify if it exists
-        if not recovered:
+    def verify_build(self, recovered: bool, repo_name: str | None = None) -> dict[str, Any]:
+        if not repo_name:
             return {
                 "tool": "build.verify",
                 "status": "failed",
-                "recoverable": True,
-                "error": "Live mode: dependency gap detected.",
-                "summary": "Live mode: build failed with a recoverable gap.",
+                "recoverable": False,
+                "error": "Live mode: repository name was missing for verification.",
+                "summary": "Live mode: repository health could not be checked.",
             }
+
+        health = self.check_repo_health(repo_name)
+        status = "success" if health.get("status") == "success" and health.get("healthy") else "failed"
         return {
             "tool": "build.verify",
-            "status": "success",
+            "status": status,
             "recoverable": False,
-            "checks": ["unit", "lint", "package"],
-            "summary": "Live mode: build verification passed.",
+            "checks": ["github_repo_health"],
+            "repo": repo_name,
+            "summary": (
+                "Live mode: generated repository health check passed."
+                if status == "success"
+                else health.get("summary", "Live mode: generated repository health check failed.")
+            ),
+            "repo_health": health,
         }
 
     def recover_build(self) -> dict[str, Any]:

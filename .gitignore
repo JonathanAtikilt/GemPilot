@@ -15,6 +15,7 @@ __pycache__/
 .coverage
 htmlcov/
 *.egg-info/
+logs/*.log
 
 .idea/
 .playwright-mcp/

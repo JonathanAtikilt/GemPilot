@@ -35,15 +35,19 @@ def _health_result(repo_name: str, files: set[str], commit_count: int) -> dict:
     ).model_dump()
 
 
-def check_repo_health(repo_name: str) -> dict:
+def check_repo_health(
+    repo_name: str,
+    *,
+    config: GitHubConfig | None = None,
+) -> dict:
     """Check whether a generated repo has the minimum demo artifacts."""
 
     repo_error = validate_generated_repo_name(repo_name)
     if repo_error:
         return repo_error.model_dump(mode="json")
 
-    config = GitHubConfig.from_env()
-    if config.mock_tools or not config.token:
+    active_config = config or GitHubConfig.from_env()
+    if active_config.mock_tools or not active_config.token:
         output = _health_result(repo_name, mock_store.list_files(repo_name), mock_store.commit_count(repo_name))
         status = "mock" if output["healthy"] else "failed"
         if status == "failed":
@@ -55,7 +59,7 @@ def check_repo_health(repo_name: str) -> dict:
             ).model_dump(mode="json")
         return ToolResult.mock("github.check_repo_health", output).model_dump(mode="json")
 
-    client = GitHubClient(config)
+    client = GitHubClient(active_config)
     files: set[str] = set()
     errors: list[str] = []
     try:

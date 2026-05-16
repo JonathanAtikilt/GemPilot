@@ -20,7 +20,7 @@ const defaultTitle = "Healthcare Referral Coordinator";
 const defaultIdea = "Build a healthcare referral coordination agent that helps clinics prevent failed referrals.";
 
 const flightStops: AgentStep[] = [
-  { phase: "PREFLIGHT", title: "Capture brief", detail: "Package the title, idea, GitHub authorization, rules URL, and extra source material.", status: "Ready" },
+  { phase: "PREFLIGHT", title: "Capture brief", detail: "Package the title, idea, GitHub connection, rules URL, and extra source material.", status: "Ready" },
   { phase: "RAG SCAN", title: "Retrieve rules", detail: "Index hackathon rules, NVIDIA docs, uploaded files, and additional URLs.", status: "Pending" },
   { phase: "SCOPE", title: "Plan MVP", detail: "Nemotron narrows the broad idea into a realistic hackathon build.", status: "Pending" },
   { phase: "SYNTH", title: "Generate repo", detail: "OpenClaw coordinates repo creation, code generation, commits, and build logs.", status: "Pending" },
@@ -34,15 +34,19 @@ const sourceTypes = [
   "Optional uploaded README, PDF, TXT, or Markdown files",
 ];
 
-function readGithubAuthCode() {
+function readGithubConnectionId() {
   if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
-  const code = params.get("code");
-  const state = params.get("state");
-  const expectedState = window.localStorage.getItem("mvpilot_github_oauth_state");
+  const connectionId = params.get("github_connection_id");
+  const status = params.get("github_status");
 
-  return code && state === expectedState ? code : null;
+  if (connectionId && status === "ready") {
+    window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
+    return connectionId;
+  }
+
+  return window.sessionStorage.getItem("mvpilot_github_connection_id");
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -78,8 +82,8 @@ export default function Home() {
   const [primaryRulesUrl, setPrimaryRulesUrl] = useState("https://developer.nvidia.com/");
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
-  const [githubAuthCode, setGithubAuthCode] = useState<string | null>(null);
-  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo after backend token exchange.");
+  const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
+  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo through the backend.");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [repoUrl, setRepoUrl] = useState<string | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "sent" | "mocked" | "error">("idle");
@@ -87,11 +91,11 @@ export default function Home() {
 
   useEffect(() => {
     Promise.resolve().then(() => {
-      const code = readGithubAuthCode();
+      const connectionId = readGithubConnectionId();
 
-      if (code) {
-        setGithubAuthCode(code);
-        setGithubMessage("GitHub authorization received. Person 1's backend still needs to exchange this code for an access token.");
+      if (connectionId) {
+        setGithubConnectionId(connectionId);
+        setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
         window.history.replaceState({}, "", window.location.pathname);
       }
     });
@@ -101,8 +105,8 @@ export default function Home() {
     () => ({
       title: projectTitle.trim() || "Untitled MVP idea",
       idea,
-      github_connected: Boolean(githubAuthCode),
-      github_auth_code: githubAuthCode ? "received_by_frontend" : null,
+      github_connected: Boolean(githubConnectionId),
+      github_connection_id: githubConnectionId,
       primary_rules_url: primaryRulesUrl.trim() || null,
       additional_urls: additionalSources
         .filter((source): source is Extract<AdditionalSource, { type: "url" }> => source.type === "url")
@@ -117,7 +121,7 @@ export default function Home() {
         })),
       source: "mvpilot_frontend",
     }),
-    [additionalSources, githubAuthCode, idea, primaryRulesUrl, projectTitle],
+    [additionalSources, githubConnectionId, idea, primaryRulesUrl, projectTitle],
   );
 
   const hasLaunched = submitState !== "idle" && submitState !== "error";
@@ -136,28 +140,23 @@ export default function Home() {
   });
 
   function connectGitHub() {
-    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
 
-    if (!clientId) {
-      setGithubMessage("Missing NEXT_PUBLIC_GITHUB_CLIENT_ID. Add the client ID to .env.local, then restart npm run dev.");
+    if (!apiBaseUrl) {
+      setGithubMessage("Missing NEXT_PUBLIC_AGENT_API_URL. Start the FastAPI backend URL before connecting GitHub.");
       return;
     }
 
-    const state = crypto.randomUUID();
-    window.localStorage.setItem("mvpilot_github_oauth_state", state);
-
     const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: window.location.origin,
-      scope: "repo read:user user:email",
-      state,
+      return_to: window.location.origin,
     });
 
-    window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
+    window.location.href = `${apiBaseUrl}/github/connect?${params.toString()}`;
   }
 
   function disconnectGitHub() {
-    setGithubAuthCode(null);
+    setGithubConnectionId(null);
+    window.sessionStorage.removeItem("mvpilot_github_connection_id");
     setGithubMessage("GitHub disconnected for this browser session.");
   }
 
@@ -221,8 +220,9 @@ export default function Home() {
     formData.append("primary_rules_url", primaryRulesUrl.trim());
     formData.append("source", "mvpilot_frontend");
 
-    if (githubAuthCode) {
-      formData.append("github_auth_code", githubAuthCode);
+    if (githubConnectionId) {
+      formData.append("github_connected", "true");
+      formData.append("github_connection_id", githubConnectionId);
     }
 
     additionalSources.forEach((source) => {
@@ -307,9 +307,9 @@ export default function Home() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">GitHub Link</p>
-                        <p className="mt-1 text-sm leading-5 text-[#b9cacb]">Backend exchanges the temporary code. No GitHub secret is stored in the browser.</p>
+                        <p className="mt-1 text-sm leading-5 text-[#b9cacb]">Backend owns OAuth and stores the token server-side. No GitHub secret is stored in the browser.</p>
                       </div>
-                      {githubAuthCode ? (
+                      {githubConnectionId ? (
                         <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
                         <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect</button>
@@ -317,7 +317,7 @@ export default function Home() {
                     </div>
                     <div className="mt-3 flex items-start justify-between gap-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">
                       <p className="text-sm leading-6 text-[#b9cacb]">{githubMessage}</p>
-                      <StatusPill status={githubAuthCode ? "Complete" : "Ready"} />
+                      <StatusPill status={githubConnectionId ? "Complete" : "Ready"} />
                     </div>
                   </section>
 
@@ -428,7 +428,7 @@ export default function Home() {
                       <p>Primary URL: {primaryRulesUrl}</p>
                       <p>Extra URLs: {additionalUrlCount}</p>
                       <p>Extra files: {additionalFileCount}</p>
-                      <p>GitHub: {githubAuthCode ? "CONNECTED" : "NOT CONNECTED"}</p>
+                      <p>GitHub: {githubConnectionId ? "CONNECTED" : "NOT CONNECTED"}</p>
                     </div>
                   </div>
 
@@ -475,7 +475,7 @@ export default function Home() {
             <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Person 1 Handoff</p>
             <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Payload unchanged</h2>
             <div className="mt-3 space-y-2 text-sm leading-6 text-[#b9cacb]">
-              <p>POST /agent/run receives title, idea, github_auth_code, primary_rules_url, additional_urls, additional_files, and source.</p>
+              <p>POST /agent/run receives title, idea, github_connection_id, primary_rules_url, additional_urls, additional_files, and source.</p>
               <p>Backend returns task_id and can later return repo_url for the landing zone.</p>
             </div>
           </div>

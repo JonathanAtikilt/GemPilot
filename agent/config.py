@@ -89,6 +89,26 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="SUPABASE_ANON_KEY",
     )
+    github_oauth_client_id: str | None = Field(
+        default=None,
+        validation_alias="GITHUB_OAUTH_CLIENT_ID",
+    )
+    github_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias="GITHUB_OAUTH_CLIENT_SECRET",
+    )
+    github_oauth_redirect_uri: str | None = Field(
+        default=None,
+        validation_alias="GITHUB_OAUTH_REDIRECT_URI",
+    )
+    github_token_encryption_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="GITHUB_TOKEN_ENCRYPTION_KEY",
+    )
+    frontend_base_url: str = Field(
+        default="http://localhost:3000",
+        validation_alias="FRONTEND_BASE_URL",
+    )
     rag_scrape_urls: str = Field(
         default="",
         validation_alias="RAG_SCRAPE_URLS",
@@ -103,6 +123,8 @@ class Settings(BaseSettings):
         "openclaw_api_key",
         "supabase_service_role_key",
         "supabase_anon_key",
+        "github_oauth_client_secret",
+        "github_token_encryption_key",
         mode="before",
     )
     @classmethod
@@ -143,6 +165,15 @@ class Settings(BaseSettings):
     def supabase_configured(self) -> bool:
         return bool((self.supabase_url or "").strip()) and self._secret_has_value(
             self.supabase_service_role_key
+        )
+
+    @property
+    def github_oauth_configured(self) -> bool:
+        return (
+            bool((self.github_oauth_client_id or "").strip())
+            and bool((self.github_oauth_redirect_uri or "").strip())
+            and self._secret_has_value(self.github_oauth_client_secret)
+            and self._secret_has_value(self.github_token_encryption_key)
         )
 
     @property

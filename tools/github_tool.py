@@ -195,41 +195,41 @@ def _mock_commit_files(request: CommitFilesRequest) -> ToolResult:
     )
 
 
-def check_github_auth() -> dict:
+def check_github_auth(config: GitHubConfig | None = None) -> dict:
     """Read-only preflight check for live GitHub configuration."""
 
-    config = GitHubConfig.from_env()
-    if config.mock_tools:
+    active_config = config or GitHubConfig.from_env()
+    if active_config.mock_tools:
         return ToolResult.mock(
             "github.check_auth",
             {
                 "authenticated": False,
-                "owner": config.owner,
-                "repo_prefix": config.repo_prefix,
+                "owner": active_config.owner,
+                "repo_prefix": active_config.repo_prefix,
                 "message": "Mock mode is enabled; live GitHub auth was not checked.",
             },
         ).model_dump(mode="json")
-    if not config.token:
+    if not active_config.token:
         return ToolResult.failure(
             "github.check_auth",
             "GITHUB_TOKEN is required for live GitHub mode.",
-            {"authenticated": False, "owner": config.owner, "repo_prefix": config.repo_prefix},
+            {"authenticated": False, "owner": active_config.owner, "repo_prefix": active_config.repo_prefix},
         ).model_dump(mode="json")
-    if not config.owner:
+    if not active_config.owner:
         return ToolResult.failure(
             "github.check_auth",
             "GITHUB_OWNER is required for live GitHub mode.",
-            {"authenticated": False, "repo_prefix": config.repo_prefix},
+            {"authenticated": False, "repo_prefix": active_config.repo_prefix},
         ).model_dump(mode="json")
 
-    client = GitHubClient(config)
+    client = GitHubClient(active_config)
     try:
         user = client.get_authenticated_user()
     except Exception as exc:
         return ToolResult.failure(
             "github.check_auth",
             str(exc),
-            {"authenticated": False, "owner": config.owner, "repo_prefix": config.repo_prefix},
+            {"authenticated": False, "owner": active_config.owner, "repo_prefix": active_config.repo_prefix},
         ).model_dump(mode="json")
 
     login = user.get("login")
@@ -238,15 +238,21 @@ def check_github_auth() -> dict:
         {
             "authenticated": True,
             "login": login,
-            "owner": config.owner,
-            "owner_matches_login": login == config.owner,
-            "repo_prefix": config.repo_prefix,
+            "owner": active_config.owner,
+            "owner_matches_login": login == active_config.owner,
+            "repo_prefix": active_config.repo_prefix,
         },
         verification_status="verified",
     ).model_dump(mode="json")
 
 
-def create_repo(repo_name: str, description: str, visibility: str) -> dict:
+def create_repo(
+    repo_name: str,
+    description: str,
+    visibility: str,
+    *,
+    config: GitHubConfig | None = None,
+) -> dict:
     """Create a generated GitHub repository and verify it by reading metadata."""
 
     try:
@@ -262,11 +268,11 @@ def create_repo(repo_name: str, description: str, visibility: str) -> dict:
     if policy_error:
         return policy_error.model_dump(mode="json")
 
-    config = GitHubConfig.from_env()
-    if config.mock_tools or not config.token:
+    active_config = config or GitHubConfig.from_env()
+    if active_config.mock_tools or not active_config.token:
         return _mock_create_repo(request.repo_name, request.visibility).model_dump(mode="json")
 
-    client = GitHubClient(config)
+    client = GitHubClient(active_config)
     try:
         created = client.create_user_repo(
             request.repo_name,
@@ -291,7 +297,13 @@ def create_repo(repo_name: str, description: str, visibility: str) -> dict:
     ).model_dump(mode="json")
 
 
-def commit_files(repo_name: str, files: list[dict], message: str) -> dict:
+def commit_files(
+    repo_name: str,
+    files: list[dict],
+    message: str,
+    *,
+    config: GitHubConfig | None = None,
+) -> dict:
     """Commit multiple text files to a generated repository in one Git commit."""
 
     try:
@@ -307,11 +319,11 @@ def commit_files(repo_name: str, files: list[dict], message: str) -> dict:
     if policy_error:
         return policy_error.model_dump(mode="json")
 
-    config = GitHubConfig.from_env()
-    if config.mock_tools or not config.token:
+    active_config = config or GitHubConfig.from_env()
+    if active_config.mock_tools or not active_config.token:
         return _mock_commit_files(request).model_dump(mode="json")
 
-    client = GitHubClient(config)
+    client = GitHubClient(active_config)
     try:
         repo = client.get_repo(request.repo_name)
         branch = repo.get("default_branch") or "main"
@@ -339,7 +351,7 @@ def commit_files(repo_name: str, files: list[dict], message: str) -> dict:
 
         from tools.verifier import verify_commit
 
-        verification = verify_commit(request.repo_name, commit_sha)
+        verification = verify_commit(request.repo_name, commit_sha, config=active_config)
         verification_status = verification.get("verification_status", "failed")
         output = {
             "repo_name": request.repo_name,

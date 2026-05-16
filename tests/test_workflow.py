@@ -7,11 +7,13 @@ from agent.schemas import RunAgentRequest, TaskStatus
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
 from agent.adapters import InMemoryToolAdapter
+from agent.github_oauth import GitHubWorkflowAuth
 from agent.workflow import (
     build_initial_state,
     build_workflow,
     route_after_tool_result,
 )
+from tools.github_tool import GitHubConfig
 
 
 VALID_IDEA = (
@@ -63,6 +65,43 @@ class EmptyRagAdapter:
         return None
 
 
+class FakeGitHubConnections:
+    def __init__(self) -> None:
+        self.exchanged: list[tuple[str, str]] = []
+
+    async def exchange_for_workflow(
+        self,
+        connection_id: str,
+        *,
+        task_id: str,
+    ) -> GitHubWorkflowAuth:
+        self.exchanged.append((connection_id, task_id))
+        return GitHubWorkflowAuth(
+            connection_id=connection_id,
+            login="octocat",
+            scopes=["repo", "read:user", "user:email"],
+            config=GitHubConfig(
+                token="gho-task-token",
+                owner="octocat",
+                repo_prefix="mvpilot-generated-",
+                mock_tools=False,
+            ),
+        )
+
+
+class RecordingToolAdapter(InMemoryToolAdapter):
+    def __init__(self) -> None:
+        self.github_config: GitHubConfig | None = None
+        self.create_repo_owner: str | None = None
+
+    def set_github_config(self, config: GitHubConfig) -> None:
+        self.github_config = config
+
+    def create_repo(self, task_id: str, visibility: str) -> dict:
+        self.create_repo_owner = self.github_config.owner if self.github_config else None
+        return super().create_repo(task_id, visibility)
+
+
 @pytest.mark.asyncio
 async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_search):
     settings = Settings(_env_file=None, adapter_mode="mock")
@@ -84,6 +123,7 @@ async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_sear
     assert detail.task.status == TaskStatus.COMPLETED
     assert node_names == [
         "receive_idea",
+        "exchange_github_code",
         "retrieve_context",
         "scope_mvp",
         "plan_repo",
@@ -228,9 +268,75 @@ async def test_workflow_uses_frontend_intake_and_surfaces_source_warnings(mock_l
 
 
 @pytest.mark.asyncio
+async def test_live_workflow_missing_github_connection_fails_before_repo_creation():
+    settings = Settings(_env_file=None, adapter_mode="live")
+    workflow = build_workflow(
+        settings,
+        model_client=DeterministicModelClient(mode="mock"),
+        retrieval=EmptyRagAdapter(),
+        tools=InMemoryToolAdapter(),
+    )
+    initial_state = build_initial_state(
+        task_id="task-live-missing-github",
+        idea=VALID_IDEA,
+        repo_visibility="public",
+        demo_mode=False,
+        settings=settings,
+    )
+
+    final_state = await workflow.ainvoke(initial_state)
+
+    assert final_state["status"] == "failed"
+    assert [step.node_name for step in final_state["graph_trace"]] == [
+        "receive_idea",
+        "exchange_github_code",
+        "failed",
+    ]
+    assert "Connect GitHub" in final_state["failure_reason"]
+    assert all(tool_call.get("tool") != "github.create_repo" for tool_call in final_state["tool_calls"])
+
+
+@pytest.mark.asyncio
+async def test_live_workflow_exchanges_github_connection_before_create_repo(mock_live_rag_search):
+    settings = Settings(_env_file=None, adapter_mode="live")
+    github_connections = FakeGitHubConnections()
+    tools = RecordingToolAdapter()
+    workflow = build_workflow(
+        settings,
+        model_client=DeterministicModelClient(mode="mock"),
+        retrieval=EmptyRagAdapter(),
+        tools=tools,
+        github_connections=github_connections,
+    )
+    initial_state = build_initial_state(
+        task_id="task-live-ready",
+        idea=VALID_IDEA,
+        repo_visibility="public",
+        demo_mode=False,
+        settings=settings,
+        frontend_intake={
+            "idea": VALID_IDEA,
+            "githubConnected": True,
+            "githubConnectionId": "conn-ready",
+        },
+    )
+
+    final_state = await workflow.ainvoke(initial_state)
+
+    assert github_connections.exchanged == [("conn-ready", "task-live-ready")]
+    assert tools.create_repo_owner == "octocat"
+    assert final_state["github_connection"]["login"] == "octocat"
+    assert [step.node_name for step in final_state["graph_trace"]][:3] == [
+        "receive_idea",
+        "exchange_github_code",
+        "retrieve_context",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_unrecoverable_tool_result_marks_workflow_failed(mock_live_rag_search):
     class UnrecoverableToolAdapter(InMemoryToolAdapter):
-        def verify_build(self, *, recovered: bool) -> dict:
+        def verify_build(self, *, recovered: bool, repo_name: str | None = None) -> dict:
             return {
                 "tool": "build.verify",
                 "status": "failed",

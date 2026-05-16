@@ -38,6 +38,7 @@ from agent.frontend_intake import (
     build_optional_params_from_frontend_intake,
     build_source_context,
 )
+from agent.github_oauth import GitHubConnectionService, GitHubOAuthError
 from agent.live_adapters import LiveRagMemoryAdapter
 from agent.schemas import UploadedSourceFileContent
 
@@ -66,6 +67,7 @@ class WorkflowState(TypedDict):
     generated_artifacts: ListReducer
     last_tool_result: NotRequired[dict[str, Any]]
     repo: NotRequired[dict[str, Any]]
+    github_connection: NotRequired[dict[str, Any]]
     mvp_scope: NotRequired[dict[str, Any]]
     repo_plan: NotRequired[dict[str, Any]]
     file_manifest: NotRequired[dict[str, Any]]
@@ -121,6 +123,7 @@ def build_workflow(
     audit: AuditAdapter | None = None,
     retrieval: RagMemoryAdapter | None = None,
     tools: ToolAdapter | None = None,
+    github_connections: GitHubConnectionService | None = None,
 ):
     active_audit = audit or InMemoryAuditAdapter(model_name=settings.nemotron_fast_model)
     active_model_client = model_client or _build_default_model_client(settings)
@@ -176,6 +179,104 @@ def build_workflow(
                 f"Demo mode is {state['demo_mode']}.",
             ],
         )
+
+    async def exchange_github_code(state: WorkflowState) -> dict[str, Any]:
+        frontend_intake = FrontendIntake.model_validate(
+            state.get("frontend_intake") or {"idea": state["idea"]}
+        )
+        connection_id = frontend_intake.githubConnectionId
+
+        if settings.mock_mode:
+            return {
+                **append_step(
+                    node_name="exchange_github_code",
+                    message="Mock mode skipped live GitHub OAuth exchange.",
+                    decision_trace=[
+                        "Mock mode keeps the workflow deterministic.",
+                        "No GitHub code or token is required for mock repository actions.",
+                    ],
+                ),
+                "github_connection": {
+                    "status": "mock_skipped",
+                    "connection_id": connection_id,
+                    "login": None,
+                },
+            }
+
+        if not connection_id:
+            reason = "Connect GitHub before running live repo creation."
+            return {
+                **append_step(
+                    node_name="exchange_github_code",
+                    status="failed",
+                    message=reason,
+                    decision_trace=[
+                        "Live mode requires a backend-issued github_connection_id.",
+                        "Stopped before RAG, repo creation, or file generation.",
+                    ],
+                ),
+                "status": "failed",
+                "failure_reason": reason,
+            }
+
+        if github_connections is None:
+            reason = "GitHub connection service is not configured."
+            return {
+                **append_step(
+                    node_name="exchange_github_code",
+                    status="failed",
+                    message=reason,
+                    decision_trace=[
+                        "Live mode cannot exchange a GitHub connection without the service.",
+                        "Stopped before repo creation.",
+                    ],
+                ),
+                "status": "failed",
+                "failure_reason": reason,
+            }
+
+        try:
+            auth = await github_connections.exchange_for_workflow(
+                connection_id,
+                task_id=state["task_id"],
+            )
+            configure_github = getattr(active_tools, "set_github_config", None)
+            if configure_github is None:
+                raise GitHubOAuthError("GitHub tool adapter cannot accept per-task credentials.")
+            configure_github(auth.config)
+        except GitHubOAuthError as exc:
+            reason = str(exc) or "GitHub OAuth exchange failed."
+            return {
+                **append_step(
+                    node_name="exchange_github_code",
+                    status="failed",
+                    message=reason,
+                    decision_trace=[
+                        "GitHub OAuth exchange did not complete.",
+                        "No repository action was attempted.",
+                    ],
+                ),
+                "status": "failed",
+                "failure_reason": reason,
+            }
+
+        return {
+            **append_step(
+                node_name="exchange_github_code",
+                message="Exchanged the backend GitHub connection for live repo credentials.",
+                decision_trace=[
+                    "Validated the backend-issued github_connection_id.",
+                    f"Configured GitHub tools for connected user {auth.login}.",
+                    "Kept the access token out of workflow state and API responses.",
+                ],
+            ),
+            "github_connection": {
+                "status": "exchanged",
+                "connection_id": auth.connection_id,
+                "login": auth.login,
+                "scopes": auth.scopes,
+            },
+        }
 
     async def retrieve_context(state: WorkflowState) -> dict[str, Any]:
         frontend_intake = FrontendIntake.model_validate(
@@ -310,12 +411,16 @@ def build_workflow(
             task_id=state["task_id"],
             visibility=state["repo_visibility"],
         )
-        return {
+        update: dict[str, Any] = {
             **append_step(
                 node_name="create_repo",
-                message="Created the mock GitHub repository record.",
+                message=tool_call["summary"],
                 decision_trace=[
-                    "Used mock GitHub adapter instead of a live API call.",
+                    (
+                        "Used mock GitHub adapter instead of a live API call."
+                        if state["mock_mode"]
+                        else "Used the connected GitHub account for live repo creation."
+                    ),
                     "Stored repo metadata for later commit steps.",
                 ],
             ),
@@ -323,6 +428,10 @@ def build_workflow(
             "tool_calls": [tool_call],
             "last_tool_result": tool_call,
         }
+        if tool_call["status"] != "success":
+            update["status"] = "failed"
+            update["failure_reason"] = tool_call["summary"]
+        return update
 
     async def generate_files(state: WorkflowState) -> dict[str, Any]:
         result = await active_model_client.complete_structured(
@@ -367,21 +476,33 @@ def build_workflow(
             for artifact in state["generated_artifacts"]
         ]
         tool_call = active_tools.commit_files(repo_name=repo_name, files=files, message="Add generated artifacts")
-        return {
+        update: dict[str, Any] = {
             **append_step(
                 node_name="commit_progress",
-                message="Committed generated artifacts through the mock tool adapter.",
+                message=tool_call["summary"],
                 decision_trace=[
                     "Committed only generated package files.",
-                    "Recorded a deterministic commit SHA for dashboard traceability.",
+                    (
+                        "Recorded a deterministic commit SHA for dashboard traceability."
+                        if state["mock_mode"]
+                        else "Committed files using the connected GitHub account."
+                    ),
                 ],
             ),
             "tool_calls": [tool_call],
             "last_tool_result": tool_call,
         }
+        if tool_call["status"] != "success":
+            update["status"] = "failed"
+            update["failure_reason"] = tool_call["summary"]
+        return update
 
     def verify_build(state: WorkflowState) -> dict[str, Any]:
-        tool_call = active_tools.verify_build(recovered=state["blocker_recovered"])
+        repo_name = state.get("repo", {}).get("name")
+        tool_call = active_tools.verify_build(
+            recovered=state["blocker_recovered"],
+            repo_name=repo_name,
+        )
         status = "completed" if tool_call["status"] == "success" else "blocked"
         return {
             **append_step(
@@ -573,7 +694,7 @@ def build_workflow(
         reason = state.get("failure_reason") or "Unrecoverable mock tool failure."
         final_report = {
             "status": "failed",
-            "mode": "mock",
+            "mode": "mock" if state["mock_mode"] else "live",
             "model": state["nemotron_model"],
             "summary": reason,
         }
@@ -594,6 +715,7 @@ def build_workflow(
 
     graph = StateGraph(WorkflowState)
     graph.add_node("receive_idea", receive_idea)
+    graph.add_node("exchange_github_code", exchange_github_code)
     graph.add_node("retrieve_context", retrieve_context)
     graph.add_node("scope_mvp", scope_mvp)
     graph.add_node("plan_repo", plan_repo)
@@ -607,13 +729,35 @@ def build_workflow(
     graph.add_node("report_result", report_result)
     graph.add_node("failed", failed)
     graph.add_edge(START, "receive_idea")
-    graph.add_edge("receive_idea", "retrieve_context")
+    graph.add_edge("receive_idea", "exchange_github_code")
+    graph.add_conditional_edges(
+        "exchange_github_code",
+        route_after_github_exchange,
+        {
+            "retrieve_context": "retrieve_context",
+            "failed": "failed",
+        },
+    )
     graph.add_edge("retrieve_context", "scope_mvp")
     graph.add_edge("scope_mvp", "plan_repo")
     graph.add_edge("plan_repo", "create_repo")
-    graph.add_edge("create_repo", "generate_files")
+    graph.add_conditional_edges(
+        "create_repo",
+        route_after_create_repo,
+        {
+            "generate_files": "generate_files",
+            "failed": "failed",
+        },
+    )
     graph.add_edge("generate_files", "commit_progress")
-    graph.add_edge("commit_progress", "verify_build")
+    graph.add_conditional_edges(
+        "commit_progress",
+        route_after_commit_progress,
+        {
+            "verify_build": "verify_build",
+            "failed": "failed",
+        },
+    )
     graph.add_conditional_edges(
         "verify_build",
         route_after_tool_result,
@@ -659,3 +803,21 @@ def route_after_tool_result(state: dict[str, Any]) -> str:
     if result.get("recoverable") is True:
         return "handle_blocker"
     return "failed"
+
+
+def route_after_github_exchange(state: dict[str, Any]) -> str:
+    if state.get("status") == "failed":
+        return "failed"
+    return "retrieve_context"
+
+
+def route_after_create_repo(state: dict[str, Any]) -> str:
+    if state.get("status") == "failed":
+        return "failed"
+    return "generate_files"
+
+
+def route_after_commit_progress(state: dict[str, Any]) -> str:
+    if state.get("status") == "failed":
+        return "failed"
+    return "verify_build"
