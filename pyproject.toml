@@ -39,4 +39,4 @@ addopts = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent*"]
+include = ["agent*", "tools*"]
