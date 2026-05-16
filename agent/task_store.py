@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any, Mapping
 from uuid import uuid4
 
 from agent.schemas import (
-    AgentStep,
     ApprovalDecisionRequest,
     ApprovalRecord,
     RunAgentRequest,
@@ -31,8 +31,6 @@ class InMemoryTaskStore:
     async def create_task(
         self,
         request: RunAgentRequest,
-        *,
-        model_name: str,
     ) -> TaskRecord:
         task_id = str(uuid4())
         now = self._now()
@@ -45,23 +43,7 @@ class InMemoryTaskStore:
             created_at=now,
             updated_at=now,
         )
-        initial_step = AgentStep(
-            node_name="receive_idea",
-            status="completed",
-            message="Received the idea and initialized deterministic mock task state.",
-            model=model_name,
-            decision_trace=[
-                "Accepted the idea payload.",
-                "Created the stable dashboard response shell.",
-                "Deferred LangGraph execution to the next backend slice.",
-            ],
-            timestamp=now,
-        )
-        detail = TaskDetailResponse(
-            task=task,
-            agent_steps=[initial_step],
-            graph_trace=[initial_step],
-        )
+        detail = TaskDetailResponse(task=task)
 
         async with self._lock:
             self._tasks = {**self._tasks, task_id: detail}
@@ -74,6 +56,41 @@ class InMemoryTaskStore:
             if detail is None:
                 raise TaskNotFoundError(task_id)
             return detail.model_copy(deep=True)
+
+    async def snapshot_task(
+        self,
+        task_id: str,
+        state: Mapping[str, Any],
+    ) -> TaskDetailResponse:
+        now = self._now()
+
+        async with self._lock:
+            current = self._tasks.get(task_id)
+            if current is None:
+                raise TaskNotFoundError(task_id)
+
+            updated_task = current.task.model_copy(
+                update={
+                    "status": TaskStatus(state.get("status", current.task.status)),
+                    "updated_at": now,
+                }
+            )
+            updated_detail = TaskDetailResponse(
+                task=updated_task,
+                agent_steps=list(state.get("agent_steps", current.agent_steps)),
+                retrieved_docs=list(state.get("retrieved_docs", current.retrieved_docs)),
+                memory_matches=list(state.get("memory_matches", current.memory_matches)),
+                tool_calls=list(state.get("tool_calls", current.tool_calls)),
+                approvals=current.approvals,
+                generated_artifacts=list(
+                    state.get("generated_artifacts", current.generated_artifacts)
+                ),
+                graph_trace=list(state.get("graph_trace", current.graph_trace)),
+                final_report=state.get("final_report", current.final_report),
+            )
+            self._tasks = {**self._tasks, task_id: updated_detail}
+
+        return updated_detail.model_copy(deep=True)
 
     async def seed_pending_approval(
         self,

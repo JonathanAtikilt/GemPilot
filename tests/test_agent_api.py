@@ -69,7 +69,7 @@ def test_run_agent_rejects_invalid_repo_visibility(client):
     assert response.status_code == 422
 
 
-def test_task_detail_returns_dashboard_shape_with_initial_graph_trace(client):
+def test_task_detail_returns_populated_workflow_dashboard(client):
     task_id = start_task(client)
 
     response = client.get(f"/agent/tasks/{task_id}")
@@ -91,16 +91,42 @@ def test_task_detail_returns_dashboard_shape_with_initial_graph_trace(client):
     assert data["task"]["idea"] == VALID_IDEA
     assert data["task"]["repo_visibility"] == "public"
     assert data["task"]["demo_mode"] is True
-    assert data["task"]["status"] == "started"
-    assert data["retrieved_docs"] == []
-    assert data["memory_matches"] == []
-    assert data["tool_calls"] == []
+    assert data["task"]["status"] == "completed"
+    assert data["retrieved_docs"]
+    assert data["memory_matches"]
+    assert [tool_call["tool"] for tool_call in data["tool_calls"]] == [
+        "github.create_repo",
+        "github.commit_files",
+        "build.verify",
+        "build.apply_recovery_patch",
+        "build.verify",
+    ]
     assert data["approvals"] == []
-    assert data["generated_artifacts"] == []
-    assert data["final_report"] is None
-    assert data["agent_steps"][0]["node_name"] == "receive_idea"
-    assert data["graph_trace"][0]["node_name"] == "receive_idea"
-    assert data["agent_steps"][0]["decision_trace"]
+    assert {artifact["name"] for artifact in data["generated_artifacts"]} >= {
+        "README.md",
+        "demo_script.md",
+        "pitch.md",
+        "final_report.json",
+    }
+    assert data["final_report"]["status"] == "completed"
+    assert [step["node_name"] for step in data["graph_trace"]] == [
+        "receive_idea",
+        "retrieve_context",
+        "scope_mvp",
+        "plan_repo",
+        "create_repo",
+        "generate_files",
+        "commit_progress",
+        "verify_build",
+        "handle_blocker",
+        "verify_build",
+        "generate_final_package",
+        "remember_outcome",
+        "report_result",
+    ]
+    assert data["agent_steps"] == data["graph_trace"]
+    assert all(step["model"] for step in data["agent_steps"])
+    assert all(step["decision_trace"] for step in data["agent_steps"])
 
 
 def test_task_detail_returns_404_for_missing_tasks(client):

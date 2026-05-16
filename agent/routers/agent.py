@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from agent.dependencies import get_agent_service
 from agent.schemas import (
@@ -23,9 +23,10 @@ router = APIRouter(prefix="/agent")
 )
 async def run_agent(
     request: RunAgentRequest,
+    background_tasks: BackgroundTasks,
     service: AgentService = Depends(get_agent_service),
 ) -> RunAgentResponse:
-    return await service.start_task(request)
+    return await service.start_task(request, background_tasks=background_tasks)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskDetailResponse)
