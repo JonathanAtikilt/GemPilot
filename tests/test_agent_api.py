@@ -82,7 +82,8 @@ def test_run_agent_accepts_current_frontend_multipart_payload(
                 "https://example.com/judging",
                 "https://developer.nvidia.com/nemotron",
             ],
-            "github_auth_code": "temporary-oauth-code",
+            "github_connection_id": "conn_ready_123",
+            "github_connected": "true",
             "source": "mvpilot_frontend",
         },
         files=[
@@ -114,6 +115,7 @@ def test_run_agent_accepts_current_frontend_multipart_payload(
         }
     ]
     assert task["github_connected"] is True
+    assert task["github_connection_id"] == "conn_ready_123"
     assert task["source"] == "mvpilot_frontend"
     assert "temporary-oauth-code" not in detail_response.text
 
@@ -243,6 +245,7 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     assert data["final_report"]["blocker_analysis"]["blocker_type"]
     assert [step["node_name"] for step in data["graph_trace"]] == [
         "receive_idea",
+        "exchange_github_code",
         "retrieve_context",
         "scope_mvp",
         "plan_repo",

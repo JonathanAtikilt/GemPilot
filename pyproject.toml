@@ -15,6 +15,7 @@ dependencies = [
     "python-multipart",
     "python-dotenv",
     "httpx",
+    "cryptography",
     "beautifulsoup4",
     "langgraph",
     "supabase",

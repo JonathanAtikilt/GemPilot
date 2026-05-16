@@ -3,6 +3,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 from agent.live_adapters import LiveRagMemoryAdapter, LiveToolAdapter, LiveAuditAdapter
 from agent.rag.errors import RagConfigurationError
+from tools.github_tool import GitHubConfig
 
 
 @pytest.mark.asyncio
@@ -92,7 +93,13 @@ async def test_live_rag_memory_adapter_build_context_raises_without_rag_config()
 
 
 def test_live_tool_adapter():
-    adapter = LiveToolAdapter()
+    github_config = GitHubConfig(
+        token="gho-task-token",
+        owner="octocat",
+        repo_prefix="mvpilot-generated-",
+        mock_tools=False,
+    )
+    adapter = LiveToolAdapter(github_config=github_config)
     
     with patch("agent.live_adapters.create_repo") as mock_create_repo:
         mock_create_repo.return_value = {
@@ -112,7 +119,12 @@ def test_live_tool_adapter():
         assert res["repo"]["name"] == "mvpilot-generated-task_123"
         assert res["repo"]["url"] == "https://github.com/test/mvpilot-generated-task_123"
         assert res["raw_result"]["tool_name"] == "github.create_repo"
-        mock_create_repo.assert_called_with(repo_name="mvpilot-generated-task_123", description="Generated MVP", visibility="public")
+        mock_create_repo.assert_called_with(
+            repo_name="mvpilot-generated-task_123",
+            description="Generated MVP",
+            visibility="public",
+            config=github_config,
+        )
 
     with patch("agent.live_adapters.commit_files") as mock_commit:
         mock_commit.return_value = {
@@ -130,6 +142,12 @@ def test_live_tool_adapter():
         assert res["commit_sha"] == "abc123"
         assert res["files"] == ["a.txt"]
         assert res["raw_result"]["tool_name"] == "github.commit_files"
+        mock_commit.assert_called_with(
+            repo_name="repo",
+            files=[{"path": "a.txt", "content": "x"}],
+            message="msg",
+            config=github_config,
+        )
 
     with patch("agent.live_adapters.check_repo_health") as mock_check:
         mock_check.return_value = {
@@ -143,6 +161,7 @@ def test_live_tool_adapter():
         assert res["status"] == "success"
         assert res["healthy"] is True
         assert res["raw_result"]["tool_name"] == "github.check_repo_health"
+        mock_check.assert_called_with("repo", config=github_config)
 
     with patch("agent.live_adapters.detect_blocker") as mock_detect:
         mock_detect.return_value = {
@@ -179,9 +198,20 @@ def test_live_tool_adapter():
         assert res["verification_status"] == "verified"
         assert res["files_changed"] == ["a.txt"]
         assert res["raw_result"]["tool_name"] == "github.verify_commit"
+        mock_verify.assert_called_with("repo", "sha", config=github_config)
         
-    assert adapter.verify_build(recovered=False)["status"] == "failed"
-    assert adapter.verify_build(recovered=True)["status"] == "success"
+    with patch.object(adapter, "check_repo_health") as mock_health:
+        mock_health.return_value = {
+            "tool": "github.check_repo_health",
+            "status": "success",
+            "recoverable": False,
+            "healthy": True,
+            "summary": "Checked generated repository health.",
+        }
+        assert adapter.verify_build(recovered=False, repo_name="repo")["status"] == "success"
+        mock_health.assert_called_with("repo")
+
+    assert adapter.verify_build(recovered=True, repo_name=None)["status"] == "failed"
     assert adapter.recover_build()["status"] == "success"
 
 

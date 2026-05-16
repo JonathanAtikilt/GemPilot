@@ -17,13 +17,21 @@ from agent.schemas import (
 )
 from agent.task_store import InMemoryTaskStore
 from agent.frontend_intake import build_frontend_intake_from_task
+from agent.github_oauth import GitHubConnectionService
 from agent.workflow import build_initial_state, build_workflow
 
 
 class AgentService:
-    def __init__(self, task_store: InMemoryTaskStore, settings: Settings) -> None:
+    def __init__(
+        self,
+        task_store: InMemoryTaskStore,
+        settings: Settings,
+        *,
+        github_connections: GitHubConnectionService | None = None,
+    ) -> None:
         self._task_store = task_store
         self._settings = settings
+        self._github_connections = github_connections
 
     async def start_task(
         self,
@@ -72,7 +80,13 @@ class AgentService:
             tools = LiveToolAdapter()
             audit = LiveAuditAdapter(model_name=self._settings.nemotron_fast_model)
 
-        workflow = build_workflow(self._settings, tools=tools, retrieval=rag, audit=audit)
+        workflow = build_workflow(
+            self._settings,
+            tools=tools,
+            retrieval=rag,
+            audit=audit,
+            github_connections=self._github_connections,
+        )
 
         try:
             async for snapshot in workflow.astream(state, stream_mode="values"):
