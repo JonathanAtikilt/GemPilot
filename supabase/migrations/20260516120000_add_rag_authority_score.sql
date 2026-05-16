@@ -13,7 +13,9 @@ end;
 
 create index if not exists rag_chunks_authority_score_idx on public.rag_chunks (authority_score);
 
-create or replace function public.match_rag_chunks(
+drop function if exists public.match_rag_chunks(extensions.vector, integer, double precision, text[]);
+
+create function public.match_rag_chunks(
   query_embedding extensions.vector(2048),
   match_count int default 10,
   match_threshold float default -1,
