@@ -43,7 +43,19 @@ class AgentService:
             demo_mode=detail.task.demo_mode,
             settings=self._settings,
         )
-        workflow = build_workflow(self._settings)
+        
+        if self._settings.mock_mode:
+            from agent.adapters import InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
+            tools = InMemoryToolAdapter()
+            rag = InMemoryRagMemoryAdapter()
+            audit = InMemoryAuditAdapter(model_name=self._settings.nemotron_fast_model)
+        else:
+            from agent.live_adapters import LiveAuditAdapter, LiveRagMemoryAdapter, LiveToolAdapter
+            tools = LiveToolAdapter()
+            rag = LiveRagMemoryAdapter()
+            audit = LiveAuditAdapter(model_name=self._settings.nemotron_fast_model)
+
+        workflow = build_workflow(self._settings, tools=tools, retrieval=rag, audit=audit)
 
         try:
             async for snapshot in workflow.astream(state, stream_mode="values"):

@@ -4,8 +4,8 @@ from agent.config import Settings
 from agent.schemas import RunAgentRequest, TaskStatus
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
+from agent.adapters import InMemoryToolAdapter
 from agent.workflow import (
-    MockToolAdapter,
     build_initial_state,
     build_workflow,
     route_after_tool_result,
@@ -111,7 +111,7 @@ def test_route_after_tool_result_fails_unrecoverable_result():
 
 @pytest.mark.asyncio
 async def test_unrecoverable_tool_result_marks_workflow_failed():
-    class UnrecoverableToolAdapter(MockToolAdapter):
+    class UnrecoverableToolAdapter(InMemoryToolAdapter):
         def verify_build(self, *, recovered: bool) -> dict:
             return {
                 "tool": "build.verify",
