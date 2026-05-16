@@ -43,3 +43,23 @@ def get_supabase_url() -> str | None:
 
 def get_supabase_service_role_key() -> str | None:
     return os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip() or None
+
+
+RAG_SCRAPE_URLS_FILE = PROJECT_ROOT / "rag" / "scrape_urls.txt"
+
+
+def get_scrape_seed_urls() -> list[str]:
+    urls: list[str] = []
+
+    for part in os.getenv("RAG_SCRAPE_URLS", "").split(","):
+        candidate = part.strip()
+        if candidate:
+            urls.append(candidate)
+
+    if RAG_SCRAPE_URLS_FILE.exists():
+        for line in RAG_SCRAPE_URLS_FILE.read_text(encoding="utf-8").splitlines():
+            candidate = line.strip()
+            if candidate and not candidate.startswith("#"):
+                urls.append(candidate)
+
+    return list(dict.fromkeys(urls))

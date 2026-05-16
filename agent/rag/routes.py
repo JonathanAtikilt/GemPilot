@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from agent.rag.build_context import build_build_context_response
 from agent.rag.errors import RagConfigurationError
 from agent.rag.ingest import ingest_rag
 from agent.rag.retrieve import search_rag
@@ -8,6 +9,8 @@ from agent.rag.types import (
     AnswerContextRequest,
     AnswerContextResponse,
     ApiChunk,
+    BuildContextRequest,
+    BuildContextResponse,
     IngestResponse,
     SearchRequest,
     SearchResponse,
@@ -36,6 +39,16 @@ async def search(request: SearchRequest) -> SearchResponse:
             chunks=[ApiChunk.from_search_result(chunk) for chunk in chunks],
             warning=warning,
         )
+    except RagConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@router.post("/get-build-context", response_model=BuildContextResponse)
+async def get_build_context_endpoint(request: BuildContextRequest) -> BuildContextResponse:
+    try:
+        return await build_build_context_response(request)
     except RagConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:

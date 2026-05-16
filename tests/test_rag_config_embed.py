@@ -50,6 +50,7 @@ async def test_rerank_chunks_returns_vector_order_without_key(monkeypatch) -> No
             source="source.md",
             title="Source",
             doc_type="unknown",
+            authority_score=0.5,
             text="first chunk",
             score=0.7,
         )

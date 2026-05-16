@@ -1,22 +1,17 @@
-create extension if not exists vector with schema extensions;
+alter table public.rag_chunks
+  add column if not exists authority_score double precision not null default 0.5;
 
-create table if not exists public.rag_chunks (
-  id uuid primary key default gen_random_uuid(),
-  chunk_id text unique not null,
-  source text not null,
-  title text,
-  doc_type text,
-  text text not null,
-  metadata jsonb default '{}'::jsonb,
-  authority_score double precision not null default 0.5,
-  embedding extensions.vector(2048),
-  created_at timestamptz default now()
-);
+update public.rag_chunks
+set authority_score = case doc_type
+  when 'hackathon_rules' then 1.0
+  when 'nvidia_docs' then 0.95
+  when 'generated_project_doc' then 0.85
+  when 'build_log' then 0.75
+  when 'team_notes' then 0.5
+  else 0.5
+end;
 
-alter table public.rag_chunks enable row level security;
-
-create index if not exists rag_chunks_source_idx on public.rag_chunks (source);
-create index if not exists rag_chunks_doc_type_idx on public.rag_chunks (doc_type);
+create index if not exists rag_chunks_authority_score_idx on public.rag_chunks (authority_score);
 
 create or replace function public.match_rag_chunks(
   query_embedding extensions.vector(2048),

@@ -44,7 +44,7 @@ async def rerank_chunks(
             if isinstance(index, int) and 0 <= index < len(chunks):
                 chunk = chunks[index].model_copy()
                 chunk.rerank_score = float(ranking.get("logit", 0))
-                chunk.score = chunk.rerank_score
+                chunk.score = chunk.rerank_score * chunk.authority_score
                 ranked.append(chunk)
 
         return ranked, None

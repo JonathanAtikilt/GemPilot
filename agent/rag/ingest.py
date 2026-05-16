@@ -3,6 +3,7 @@ from pathlib import Path
 from agent.rag.chunk import chunk_document, detect_doc_type, extract_title
 from agent.rag.config import LOGS_DIR, PROJECT_ROOT, RAG_SOURCES_DIR, get_embedding_model
 from agent.rag.embed import embed_text
+from agent.rag.scrape import scrape_configured_urls
 from agent.rag.store import get_rag_store
 from agent.rag.types import IngestResponse, SourceDocument
 
@@ -30,9 +31,13 @@ async def ingest_rag(logs_only: bool = False) -> IngestResponse:
 
 
 async def load_documents(logs_only: bool = False) -> list[SourceDocument]:
+    documents: list[SourceDocument] = []
+
+    if not logs_only:
+        documents.extend(await scrape_configured_urls())
+
     roots = [LOGS_DIR] if logs_only else [RAG_SOURCES_DIR, LOGS_DIR]
     files = [file_path for root in roots for file_path in _find_text_files(root)]
-    documents: list[SourceDocument] = []
 
     for file_path in files:
         text = file_path.read_text(encoding="utf-8")

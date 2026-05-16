@@ -1,0 +1,3 @@
+# One seed URL per line. Ingest fetches each page plus same-domain links found on that page only.
+# Example:
+# https://www.shortesthack.com/?tab=rules
