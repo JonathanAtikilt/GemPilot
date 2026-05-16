@@ -39,6 +39,7 @@ class InMemoryTaskStore:
             idea=request.idea,
             repo_visibility=request.repo_visibility,
             demo_mode=request.demo_mode,
+            source_urls=list(request.source_urls),
             status=TaskStatus.STARTED,
             created_at=now,
             updated_at=now,

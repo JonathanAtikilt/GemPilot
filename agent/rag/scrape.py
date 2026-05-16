@@ -35,8 +35,9 @@ SKIP_EXTENSIONS = {
 }
 
 
-async def scrape_configured_urls() -> list[SourceDocument]:
-    seeds = get_scrape_seed_urls()
+async def scrape_urls(seed_urls: list[str]) -> list[SourceDocument]:
+    """Scrape explicit seed URLs (orchestrator intake), same rules as configured scrape."""
+    seeds = _normalize_seed_list(seed_urls)
     if not seeds:
         return []
 
@@ -50,6 +51,19 @@ async def scrape_configured_urls() -> list[SourceDocument]:
             documents.extend(await scrape_seed_page(client, seed_url))
 
     return _dedupe_documents(documents)
+
+
+async def scrape_configured_urls() -> list[SourceDocument]:
+    return await scrape_urls(get_scrape_seed_urls())
+
+
+def _normalize_seed_list(seed_urls: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for seed in seed_urls:
+        page = normalize_page_url(seed)
+        if page and page not in normalized:
+            normalized.append(page)
+    return normalized
 
 
 async def scrape_seed_page(client: httpx.AsyncClient, seed_url: str) -> list[SourceDocument]:

@@ -239,6 +239,8 @@ def _build_search_query(request: BuildContextRequest) -> str:
             parts.append("stack: " + ", ".join(params.stack))
         if params.features:
             parts.append("features: " + ", ".join(params.features))
+        if params.sourceUrls:
+            parts.append("source urls: " + ", ".join(params.sourceUrls))
         if params.repoPreference:
             parts.append(f"repository preference: {params.repoPreference}")
         if params.demoPreference:

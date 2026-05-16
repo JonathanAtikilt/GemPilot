@@ -43,10 +43,10 @@ The ingester reads `.md` and `.txt` files from:
 - `rag/sources/`
 - `logs/`
 
-It also scrapes configured web pages (seed URL plus **first-level, same-domain links only**):
+It also scrapes web pages (seed URL plus **first-level, same-domain links only**) from:
 
-- `RAG_SCRAPE_URLS` in `.env` (comma-separated), and/or
-- `rag/scrape_urls.txt` (one URL per line)
+- **Orchestrator intake** — `primary_rules_url` / `additional_urls` on `POST /agent/run` are scraped in `retrieve_context` before search (preferred for per-task rules).
+- **Static config** — `RAG_SCRAPE_URLS` in `.env` and/or `rag/scrape_urls.txt` (used by `POST /rag/ingest`).
 
 It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dimensions, and stores them in Supabase.
 

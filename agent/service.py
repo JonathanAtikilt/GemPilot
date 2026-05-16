@@ -41,6 +41,7 @@ class AgentService:
             idea=detail.task.idea,
             repo_visibility=detail.task.repo_visibility,
             demo_mode=detail.task.demo_mode,
+            source_urls=detail.task.source_urls,
             settings=self._settings,
         )
         
