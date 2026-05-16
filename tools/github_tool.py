@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from tools.policy import repo_prefix, validate_github_mutation
+from tools.policy import repo_prefix, validate_action, validate_file_payloads, validate_github_mutation
 from tools.schemas import CommitFilesRequest, CreateRepoRequest, ToolResult, safe_validation_errors
 from tools import mock_store
 
@@ -177,6 +177,7 @@ def _mock_create_repo(repo_name: str, visibility: str) -> ToolResult:
 
 
 def _mock_commit_files(request: CommitFilesRequest) -> ToolResult:
+    owner = os.getenv("GITHUB_OWNER", "mock-owner")
     commit = mock_store.commit_files(
         request.repo_name,
         {file.path: file.content for file in request.files},
@@ -187,6 +188,7 @@ def _mock_commit_files(request: CommitFilesRequest) -> ToolResult:
         {
             "repo_name": request.repo_name,
             "commit_sha": commit.sha,
+            "commit_url": f"https://github.com/{owner}/{request.repo_name}/commit/{commit.sha}",
             "message": request.message,
             "files_changed": len(request.files),
             "changed_files": commit.files_changed,
@@ -303,6 +305,7 @@ def commit_files(
     message: str,
     *,
     config: GitHubConfig | None = None,
+    allow_existing_repo: bool = False,
 ) -> dict:
     """Commit multiple text files to a generated repository in one Git commit."""
 
@@ -315,7 +318,10 @@ def commit_files(
             {"validation_error": safe_validation_errors(exc.errors(include_url=False))},
         ).model_dump(mode="json")
 
-    policy_error = validate_github_mutation("commit_files", request.repo_name, request.files)
+    if allow_existing_repo:
+        policy_error = validate_action("commit_files") or validate_file_payloads(request.files)
+    else:
+        policy_error = validate_github_mutation("commit_files", request.repo_name, request.files)
     if policy_error:
         return policy_error.model_dump(mode="json")
 
@@ -356,6 +362,11 @@ def commit_files(
         output = {
             "repo_name": request.repo_name,
             "commit_sha": commit_sha,
+            "commit_url": (
+                f"https://github.com/{active_config.owner}/{request.repo_name}/commit/{commit_sha}"
+                if active_config.owner
+                else None
+            ),
             "message": request.message,
             "files_changed": len(request.files),
             "changed_files": [file.path for file in request.files],

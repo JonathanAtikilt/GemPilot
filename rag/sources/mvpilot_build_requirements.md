@@ -59,6 +59,22 @@ Authoritative build constraints for the Orchestrator, GitHub Agent, and demo wor
 - GitHub integration: GitHub API or Octokit
 - Secrets: backend-only environment variables
 
+# Security Constraints
+
+- Frontend must never send or store GitHub, NVIDIA, or Supabase service-role tokens
+- GitHub OAuth callback must exchange the code server-side
+- Supabase service-role key is backend-only and must not be referenced in Next.js client code
+- Generated repositories may include `.env.example` placeholders but must never commit `.env`
+- Audit logs and build logs should summarize tool calls without secret values
+
+# Agent Boundaries
+
+- Frontend collects launch intent and displays progress; it does not decide project scope
+- Orchestrator calls RAG before planning and owns the final implementation plan
+- RAG retrieves, summarizes, and cites context; it does not choose or commit the project
+- GitHub Agent creates or updates repositories using server-side credentials only
+- Black Box stores decisions, logs, artifacts, errors, and final landing summaries
+
 # Scope Warnings
 
 - Do not add recursive web crawling for MVP

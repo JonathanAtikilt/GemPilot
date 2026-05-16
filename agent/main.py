@@ -12,8 +12,10 @@ from agent.github_oauth import (
     SupabaseGitHubConnectionStore,
 )
 from agent.rag.routes import router as rag_router
-from agent.routers.agent import router as agent_router
+from agent.routers.agent import orchestrator_router, router as agent_router
+from agent.routers.github import auth_router as github_auth_router
 from agent.routers.github import router as github_router
+from agent.routers.github import upload_router as github_upload_router
 from agent.routers.health import router as health_router
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
@@ -58,7 +60,10 @@ def create_app(
     )
     app.include_router(health_router)
     app.include_router(github_router)
+    app.include_router(github_auth_router)
+    app.include_router(github_upload_router)
     app.include_router(agent_router)
+    app.include_router(orchestrator_router)
     app.include_router(rag_router, prefix="/rag", tags=["rag"])
     return app
 

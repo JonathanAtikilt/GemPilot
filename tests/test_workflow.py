@@ -2,7 +2,7 @@ import pytest
 
 from agent.config import Settings
 from agent.model_client import DeterministicModelClient
-from agent.rag.build_context import get_build_context
+from agent.live_adapters import LiveRagMemoryAdapter
 from agent.schemas import RunAgentRequest, TaskStatus
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
@@ -40,17 +40,37 @@ class EmptyRagAdapter:
         idea: str,
         *,
         optional_params: dict | None = None,
+        rules_url: str | None = None,
+        reference_urls: list[str] | None = None,
+        context_needed: list[str] | None = None,
         top_k: int = 8,
     ) -> dict:
-        response = await get_build_context(
+        del (
             project_id,
             idea,
-            optional_params=optional_params,
-            top_k=top_k,
+            optional_params,
+            rules_url,
+            reference_urls,
+            context_needed,
+            top_k,
         )
-        payload = response.model_dump()
-        payload["mode"] = "live"
-        return payload
+        return {
+            "mode": "mock",
+            "requiredDeliverables": [],
+            "allowedToolsAndAPIs": [],
+            "requiredRepositoryFormat": [],
+            "requiredDemoFormat": [],
+            "requiredTechStackPieces": [],
+            "agentBoundaries": [],
+            "resolvedTechStack": {
+                "source": "default",
+                "requiredItems": [],
+                "defaultItems": [],
+                "items": [],
+            },
+            "scopeWarnings": [],
+            "evidence": [],
+        }
 
     async def retrieve_hackathon_context(self, idea: str) -> list[dict]:
         return []
@@ -97,9 +117,23 @@ class RecordingToolAdapter(InMemoryToolAdapter):
     def set_github_config(self, config: GitHubConfig) -> None:
         self.github_config = config
 
-    def create_repo(self, task_id: str, visibility: str) -> dict:
+    def create_repo(
+        self,
+        task_id: str,
+        visibility: str,
+        *,
+        repo_preference: str = "create_new_repo",
+        repo_name: str | None = None,
+        repo_url: str | None = None,
+    ) -> dict:
         self.create_repo_owner = self.github_config.owner if self.github_config else None
-        return super().create_repo(task_id, visibility)
+        return super().create_repo(
+            task_id,
+            visibility,
+            repo_preference=repo_preference,
+            repo_name=repo_name,
+            repo_url=repo_url,
+        )
 
 
 @pytest.mark.asyncio
@@ -151,8 +185,9 @@ async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_sear
     assert detail.final_report["mode"] == "mock"
     assert {artifact["name"] for artifact in detail.generated_artifacts} >= {
         "README.md",
-        "demo_script.md",
-        "pitch.md",
+        "docs/ARCHITECTURE.md",
+        "docs/BUILD_LOG.md",
+        "demo/demo_script.md",
         "final_report.json",
     }
     model_backed_steps = {
@@ -208,13 +243,21 @@ async def test_workflow_plan_repo_prompt_uses_default_stack_when_rag_stack_is_em
         return []
 
     monkeypatch.setattr("agent.rag.build_context.search_rag", fake_search)
+    monkeypatch.setattr("agent.live_adapters.search_rag", fake_search)
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_store = MagicMock()
+    mock_store.search_memories = AsyncMock(return_value=[])
+    mock_store.write_memory = AsyncMock()
+    monkeypatch.setattr("agent.rag.store.get_rag_store", lambda: mock_store)
+    monkeypatch.setattr("agent.rag.embed.embed_text", AsyncMock(return_value=[0.1, 0.2]))
 
     settings = Settings(_env_file=None, adapter_mode="mock")
     model_client = CapturingModelClient()
     workflow = build_workflow(
         settings,
         model_client=model_client,
-        retrieval=EmptyRagAdapter(),
+        retrieval=LiveRagMemoryAdapter(),
         tools=InMemoryToolAdapter(),
     )
     initial_state = build_initial_state(
@@ -228,7 +271,7 @@ async def test_workflow_plan_repo_prompt_uses_default_stack_when_rag_stack_is_em
     final_state = await workflow.ainvoke(initial_state)
     plan_prompt = model_client.prompts["plan_repo"]
 
-    assert final_state["build_context"]["requiredTechStackPieces"] == []
+    assert final_state["build_context"]["requiredTechStackPieces"]
     assert final_state["build_context"]["resolvedTechStack"]["source"] == "default"
     assert "Next.js" in plan_prompt
     assert "FastAPI" in plan_prompt
@@ -268,13 +311,15 @@ async def test_workflow_uses_frontend_intake_and_surfaces_source_warnings(mock_l
 
 
 @pytest.mark.asyncio
-async def test_live_workflow_missing_github_connection_fails_before_repo_creation():
+async def test_live_workflow_missing_github_connection_retrieves_context_then_fails_on_repo_creation():
+    from agent.live_adapters import LiveToolAdapter
+
     settings = Settings(_env_file=None, adapter_mode="live")
     workflow = build_workflow(
         settings,
         model_client=DeterministicModelClient(mode="mock"),
         retrieval=EmptyRagAdapter(),
-        tools=InMemoryToolAdapter(),
+        tools=LiveToolAdapter(),
     )
     initial_state = build_initial_state(
         task_id="task-live-missing-github",
@@ -290,10 +335,20 @@ async def test_live_workflow_missing_github_connection_fails_before_repo_creatio
     assert [step.node_name for step in final_state["graph_trace"]] == [
         "receive_idea",
         "exchange_github_code",
+        "retrieve_context",
+        "scope_mvp",
+        "plan_repo",
+        "create_repo",
         "failed",
     ]
-    assert "Connect GitHub" in final_state["failure_reason"]
-    assert all(tool_call.get("tool") != "github.create_repo" for tool_call in final_state["tool_calls"])
+    assert "Live GitHub connection is required" in final_state["failure_reason"]
+    create_repo_calls = [
+        tool_call
+        for tool_call in final_state["tool_calls"]
+        if tool_call.get("tool") == "github.create_repo"
+    ]
+    assert len(create_repo_calls) == 1
+    assert create_repo_calls[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio

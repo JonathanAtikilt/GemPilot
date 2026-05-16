@@ -489,9 +489,56 @@ def _repo_plan_payload(
     title = _project_title(idea, prompt)
     resolved_stack = _extract_resolved_stack_summary(prompt)
     warning_summary = _source_warning_summary(prompt)
+    files = [
+        "README.md",
+        "src/app.py",
+        "src/core/agent.py",
+        "tests/test_app.py",
+        "docs/ARCHITECTURE.md",
+        "docs/BUILD_LOG.md",
+        "demo/demo_script.md",
+        ".env.example",
+    ]
     return RepoPlanOutput(
-        files=["README.md", "demo_script.md", "pitch.md"],
-        test_plan=["unit workflow", "API integration", "mock build verify"],
+        files=files,
+        required_files=files,
+        selected_stack=[item.strip() for item in resolved_stack.split(",") if item.strip()],
+        repo_structure=[
+            "README.md",
+            "src/ for application code",
+            "tests/ for smoke tests",
+            "docs/ for architecture and build logs",
+            "demo/ for the judging walkthrough",
+        ],
+        implementation_steps=[
+            "Create a minimal API entrypoint.",
+            "Add a deterministic agent core that mirrors the scoped MVP.",
+            "Document architecture, build evidence, and demo flow.",
+            "Commit generated files through the GitHub Agent.",
+        ],
+        agent_assignments=[
+            "orchestrator: scope, plan, and validate the package",
+            "rag: provide rules, stack, and safety evidence before planning",
+            "github: create or update the repository and commit files",
+            "black_box: store decisions, logs, artifacts, and final summary",
+        ],
+        github_actions_needed=[
+            "create_new_repo or use_existing_repo from frontend intake",
+            "commit generated project files",
+            "return repoUrl, commitUrl, branch, filesUploaded, and errors",
+        ],
+        generated_artifacts=files,
+        security_constraints=[
+            "Never commit .env files or real secrets.",
+            "Only include placeholder values in .env.example.",
+            "Keep GitHub and Supabase service credentials server-side.",
+        ],
+        demo_requirements=[
+            "Show the flight-stage progress path.",
+            "Show RAG evidence before plan generation.",
+            "End with GitHub repo and commit links.",
+        ],
+        test_plan=["unit workflow", "API integration", "repo health smoke check"],
         architecture_notes=[
             f"Use submitted title as project identity: {title}.",
             f"Use resolvedTechStack for generated files, tests, and architecture: {resolved_stack}.",
@@ -504,9 +551,9 @@ def _repo_plan_payload(
             mode,
             fallback_reason,
             [
-                f"Selected a small artifact set for the submitted idea: {label}.",
-                "Preserved existing API response shape for the frontend.",
-                "Planned tests around workflow state instead of generated file IO.",
+                f"Selected a complete but small repo package for the submitted idea: {label}.",
+                "Planned around the RAG build context before any GitHub action.",
+                "Kept generated files secret-safe and repo-health checkable.",
             ],
         ),
     ).model_dump()
@@ -599,20 +646,104 @@ def _file_manifest_payload(
                 "summary": "Generated setup and MVP overview.",
                 "content": (
                     f"# {title}\n\nGenerated demo package for: {idea}\n\n"
-                    f"Resolved stack: {resolved_stack}.{warning_note}"
+                    f"Resolved stack: {resolved_stack}.\n\n"
+                    "## What This MVP Does\n\n"
+                    "- Accepts a project idea.\n"
+                    "- Retrieves build context before planning.\n"
+                    "- Generates a small repo package and records the outcome.\n\n"
+                    "## Run\n\n"
+                    "```bash\n"
+                    "pip install -r requirements.txt\n"
+                    "python -m src.app\n"
+                    "```\n"
+                    f"{warning_note}"
                 ),
             },
             {
-                "name": "demo_script.md",
-                "kind": "markdown",
-                "summary": "Generated a three-minute demo script.",
-                "content": f"# Demo Script\n\nShow {title}: {idea}.{warning_note}",
+                "name": "src/app.py",
+                "kind": "python",
+                "summary": "Generated minimal Python entrypoint.",
+                "content": (
+                    '"""Generated MVP entrypoint."""\n\n'
+                    "from src.core.agent import build_summary\n\n\n"
+                    "def main() -> None:\n"
+                    f"    print(build_summary({json.dumps(title)}, {json.dumps(idea)}))\n\n\n"
+                    'if __name__ == "__main__":\n'
+                    "    main()\n"
+                ),
             },
             {
-                "name": "pitch.md",
+                "name": "src/core/agent.py",
+                "kind": "python",
+                "summary": "Generated minimal agent core.",
+                "content": (
+                    '"""Tiny generated agent core for the hackathon MVP package."""\n\n\n'
+                    "def build_summary(title: str, idea: str) -> str:\n"
+                    "    return f\"{title}: scoped demo package for {idea}\"\n"
+                ),
+            },
+            {
+                "name": "tests/test_app.py",
+                "kind": "python",
+                "summary": "Generated smoke test for the agent core.",
+                "content": (
+                    "from src.core.agent import build_summary\n\n\n"
+                    "def test_build_summary_contains_title_and_idea():\n"
+                    "    output = build_summary('Demo', 'ship an MVP')\n"
+                    "    assert 'Demo' in output\n"
+                    "    assert 'ship an MVP' in output\n"
+                ),
+            },
+            {
+                "name": "docs/ARCHITECTURE.md",
                 "kind": "markdown",
-                "summary": "Generated a concise hackathon pitch.",
-                "content": f"# Pitch\n\nMVPilot turns {title} into a demo package: {idea}",
+                "summary": "Generated architecture notes grounded in the plan.",
+                "content": (
+                    "# Architecture\n\n"
+                    f"Project: {title}\n\n"
+                    "## Stack\n\n"
+                    f"{resolved_stack}\n\n"
+                    "## Agent Flow\n\n"
+                    "Frontend submits the idea, the orchestrator retrieves RAG context, "
+                    "Nemotron planning generates the package, GitHub commits files, "
+                    "and Black Box memory stores the result."
+                    f"{warning_note}"
+                ),
+            },
+            {
+                "name": "docs/BUILD_LOG.md",
+                "kind": "markdown",
+                "summary": "Generated build log stub for Black Box indexing.",
+                "content": (
+                    "# Build Log\n\n"
+                    "- Preflight complete.\n"
+                    "- RAG context retrieved before planning.\n"
+                    "- Repository package generated by MVPilot.\n"
+                ),
+            },
+            {
+                "name": "demo/demo_script.md",
+                "kind": "markdown",
+                "summary": "Generated a three-minute demo script.",
+                "content": (
+                    "# Demo Script\n\n"
+                    f"Show {title}: {idea}.\n\n"
+                    "1. Launch from the frontend.\n"
+                    "2. Show Radar Scan evidence.\n"
+                    "3. Show Flight Plan and GitHub commit links.\n"
+                    f"{warning_note}"
+                ),
+            },
+            {
+                "name": ".env.example",
+                "kind": "text",
+                "summary": "Generated placeholder environment file.",
+                "content": (
+                    "NVIDIA_API_KEY=\n"
+                    "SUPABASE_URL=\n"
+                    "SUPABASE_SERVICE_ROLE_KEY=\n"
+                    "GITHUB_TOKEN=\n"
+                ),
             },
         ],
         mode=mode,
@@ -620,9 +751,9 @@ def _file_manifest_payload(
             mode,
             fallback_reason,
             [
-                f"Mapped {title} into README, script, and pitch artifacts.",
+                f"Mapped {title} into README, app, docs, tests, demo, and env placeholder artifacts.",
                 f"Used resolved stack summary: {resolved_stack}.",
-                "Kept artifact content compact so dashboard traces stay readable.",
+                "Kept artifact content compact, commit-safe, and health-checkable.",
             ],
         ),
     ).model_dump()

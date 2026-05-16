@@ -417,6 +417,7 @@ class Person3GitHubToolTests(unittest.TestCase):
                 [
                     {"path": "README.md", "content": "# Demo"},
                     {"path": "logs/build_log.md", "content": "# Log"},
+                    {"path": "docs/ARCHITECTURE.md", "content": "# Architecture"},
                     {"path": "demo/demo_script.md", "content": "Demo"},
                     {"path": "requirements.txt", "content": "pydantic"},
                     {"path": "src/main.py", "content": "print('hi')"},
@@ -443,8 +444,11 @@ class Person3GitHubToolTests(unittest.TestCase):
             client.get_repo.return_value = {"name": "mvpilot-generated-demo"}
             client.get_contents.side_effect = [
                 {"path": "README.md"},
+                RuntimeError("missing docs/BUILD_LOG.md"),
                 {"path": "logs/build_log.md"},
                 {"path": "demo/demo_script.md"},
+                RuntimeError("missing demo_script.md"),
+                {"path": "docs/ARCHITECTURE.md"},
                 RuntimeError("missing package.json"),
                 {"path": "requirements.txt"},
                 {"type": "dir"},
@@ -468,7 +472,7 @@ class Person3GitHubToolTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["output"]["healthy"])
-        self.assertIn("logs/build_log.md exists", result["output"]["missing"])
+        self.assertIn("build log exists", result["output"]["missing"])
 
 
 if __name__ == "__main__":

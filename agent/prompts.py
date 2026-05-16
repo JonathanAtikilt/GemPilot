@@ -67,7 +67,10 @@ def build_plan_repo_prompt(
         "required stack items override MVPilot defaults. "
         "generated files, tests, and architecture must match resolvedTechStack. "
         "Align files and layout with requiredRepositoryFormat and allowedToolsAndAPIs. "
-        "Return files, test plan, architecture notes, mode, and decision trace."
+        "Return files, selected stack, required files, repo structure, implementation steps, "
+        "agent assignments, GitHub actions needed, generated artifacts, security constraints, "
+        "demo requirements, test plan, architecture notes, mode, and decision trace. "
+        "Do not include secrets or real .env values in generated files."
     )
 
 

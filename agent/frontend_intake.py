@@ -46,6 +46,11 @@ class FrontendIntake(BaseModel):
     source: str | None = None
     primaryRulesUrl: str | None = None
     additionalUrls: list[str] = Field(default_factory=list)
+    repoPreference: str = "create_new_repo"
+    repoName: str | None = None
+    repoUrl: str | None = None
+    visibility: str = "public"
+    branch: str = "main"
     uploadedFiles: list[UploadedSourceFile] = Field(default_factory=list)
     githubConnected: bool = False
     githubConnectionId: str | None = None
@@ -55,6 +60,11 @@ class FrontendIntake(BaseModel):
         "idea",
         "source",
         "primaryRulesUrl",
+        "repoPreference",
+        "repoName",
+        "repoUrl",
+        "visibility",
+        "branch",
         "githubConnectionId",
         mode="before",
     )
@@ -96,6 +106,11 @@ def build_frontend_intake_from_request(request: RunAgentRequest) -> FrontendInta
         source=request.source,
         primaryRulesUrl=request.primary_rules_url,
         additionalUrls=request.additional_urls,
+        repoPreference=request.repo_preference,
+        repoName=request.repo_name,
+        repoUrl=request.repo_url,
+        visibility=request.repo_visibility,
+        branch=request.branch,
         uploadedFiles=_safe_uploaded_files(
             request.additional_files or request.uploaded_file_contents
         ),
@@ -111,6 +126,11 @@ def build_frontend_intake_from_task(task: TaskRecord) -> FrontendIntake:
         source=task.source,
         primaryRulesUrl=task.primary_rules_url,
         additionalUrls=task.additional_urls,
+        repoPreference=task.repo_preference,
+        repoName=task.repo_name,
+        repoUrl=task.repo_url,
+        visibility=task.repo_visibility,
+        branch=task.branch,
         uploadedFiles=task.additional_files,
         githubConnected=task.github_connected,
         githubConnectionId=task.github_connection_id,
@@ -126,6 +146,10 @@ def build_optional_params_from_frontend_intake(
         optional_params["features"] = features
     if intake.githubConnected:
         optional_params["repoPreference"] = "GitHub-connected repository handoff"
+    optional_params["repoPreference"] = intake.repoPreference
+    optional_params["repoName"] = intake.repoName
+    optional_params["repoUrl"] = intake.repoUrl
+    optional_params["visibility"] = intake.visibility
     return optional_params or None
 
 

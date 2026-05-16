@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     adapter_mode: Literal["mock", "live"] = Field(
         default="mock",
         validation_alias="ADAPTER_MODE",
+    )
+    mock_mode_override: bool | None = Field(
+        default=None,
+        validation_alias="MOCK_MODE",
     )
     nvidia_api_key: SecretStr | None = Field(
         default=None,
@@ -69,6 +73,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="OPENCLAW_API_KEY",
     )
+    openclaw_gateway_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="OPENCLAW_GATEWAY_TOKEN",
+    )
     openclaw_env: str | None = Field(
         default=None,
         validation_alias="OPENCLAW_ENV",
@@ -91,15 +99,15 @@ class Settings(BaseSettings):
     )
     github_oauth_client_id: str | None = Field(
         default=None,
-        validation_alias="GITHUB_OAUTH_CLIENT_ID",
+        validation_alias=AliasChoices("GITHUB_OAUTH_CLIENT_ID", "GITHUB_CLIENT_ID"),
     )
     github_oauth_client_secret: SecretStr | None = Field(
         default=None,
-        validation_alias="GITHUB_OAUTH_CLIENT_SECRET",
+        validation_alias=AliasChoices("GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_CLIENT_SECRET"),
     )
     github_oauth_redirect_uri: str | None = Field(
         default=None,
-        validation_alias="GITHUB_OAUTH_REDIRECT_URI",
+        validation_alias=AliasChoices("GITHUB_OAUTH_REDIRECT_URI", "GITHUB_REDIRECT_URI"),
     )
     github_token_encryption_key: SecretStr | None = Field(
         default=None,
@@ -107,12 +115,18 @@ class Settings(BaseSettings):
     )
     frontend_base_url: str = Field(
         default="http://localhost:3000",
-        validation_alias="FRONTEND_BASE_URL",
+        validation_alias=AliasChoices("FRONTEND_BASE_URL", "APP_BASE_URL"),
     )
     rag_scrape_urls: str = Field(
         default="",
         validation_alias="RAG_SCRAPE_URLS",
     )
+
+    @model_validator(mode="after")
+    def apply_mock_mode_override(self) -> "Settings":
+        if self.mock_mode_override is not None:
+            self.adapter_mode = "mock" if self.mock_mode_override else "live"
+        return self
     cors_origins: list[str] = Field(
         default_factory=lambda: list(DEFAULT_CORS_ORIGINS),
         validation_alias="CORS_ORIGINS",
@@ -121,6 +135,7 @@ class Settings(BaseSettings):
     @field_validator(
         "nvidia_api_key",
         "openclaw_api_key",
+        "openclaw_gateway_token",
         "supabase_service_role_key",
         "supabase_anon_key",
         "github_oauth_client_secret",

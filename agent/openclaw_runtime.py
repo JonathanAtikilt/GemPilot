@@ -54,10 +54,30 @@ class OpenClawToolAdapter:
         self._wrapped = wrapped
         self._environment = environment or "development"
 
-    def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]:
+    def set_github_config(self, config: Any) -> None:
+        configure = getattr(self._wrapped, "set_github_config", None)
+        if configure is None:
+            raise AttributeError("Wrapped tool adapter cannot accept GitHub config.")
+        configure(config)
+
+    def create_repo(
+        self,
+        task_id: str,
+        visibility: str,
+        *,
+        repo_preference: str = "create_new_repo",
+        repo_name: str | None = None,
+        repo_url: str | None = None,
+    ) -> dict[str, Any]:
         return self._with_openclaw_trace(
             "github.create_repo",
-            self._wrapped.create_repo(task_id=task_id, visibility=visibility),
+            self._wrapped.create_repo(
+                task_id=task_id,
+                visibility=visibility,
+                repo_preference=repo_preference,
+                repo_name=repo_name,
+                repo_url=repo_url,
+            ),
         )
 
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]:

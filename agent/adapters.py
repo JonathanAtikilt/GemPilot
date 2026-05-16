@@ -14,12 +14,23 @@ class RagMemoryAdapter(Protocol):
         idea: str,
         *,
         optional_params: dict[str, Any] | None = None,
+        rules_url: str | None = None,
+        reference_urls: list[str] | None = None,
+        context_needed: list[str] | None = None,
         top_k: int = 8,
     ) -> dict[str, Any]: ...
     async def write_memory(self, memory: dict[str, Any]) -> None: ...
 
 class ToolAdapter(Protocol):
-    def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]: ...
+    def create_repo(
+        self,
+        task_id: str,
+        visibility: str,
+        *,
+        repo_preference: str = "create_new_repo",
+        repo_name: str | None = None,
+        repo_url: str | None = None,
+    ) -> dict[str, Any]: ...
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]: ...
     def check_repo_health(self, repo_name: str) -> dict[str, Any]: ...
     def detect_blocker(self, logs: list[dict[str, Any]]) -> dict[str, Any]: ...
@@ -29,7 +40,15 @@ class ToolAdapter(Protocol):
 
 class AuditAdapter(Protocol):
     def write_audit_log(
-        self, node_name: str, message: str, decision_trace: list[str], status: str
+        self,
+        node_name: str,
+        message: str,
+        decision_trace: list[str],
+        status: str,
+        *,
+        project_id: str | None = None,
+        flight_stage: str | None = None,
+        agent: str | None = None,
     ) -> AgentStep: ...
 
 
@@ -56,12 +75,18 @@ class InMemoryRagMemoryAdapter:
         idea: str,
         *,
         optional_params: dict[str, Any] | None = None,
+        rules_url: str | None = None,
+        reference_urls: list[str] | None = None,
+        context_needed: list[str] | None = None,
         top_k: int = 8,
     ) -> dict[str, Any]:
         return await self._live.retrieve_build_context(
             project_id,
             idea,
             optional_params=optional_params,
+            rules_url=rules_url,
+            reference_urls=reference_urls,
+            context_needed=context_needed,
             top_k=top_k,
         )
 
@@ -73,19 +98,31 @@ class InMemoryRagMemoryAdapter:
 
 
 class InMemoryToolAdapter:
-    def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]:
-        repo_name = f"mvpilot-demo-{task_id[:8]}"
+    def create_repo(
+        self,
+        task_id: str,
+        visibility: str,
+        *,
+        repo_preference: str = "create_new_repo",
+        repo_name: str | None = None,
+        repo_url: str | None = None,
+    ) -> dict[str, Any]:
+        repo_name = repo_name or f"mvpilot-demo-{task_id[:8]}"
         return {
-            "tool": "github.create_repo",
+            "tool": "github.create_repo" if repo_preference == "create_new_repo" else "github.use_existing_repo",
             "status": "success",
             "mock_mode": True,
             "recoverable": False,
             "repo": {
                 "name": repo_name,
                 "visibility": visibility,
-                "url": f"https://github.com/mock-org/{repo_name}",
+                "url": repo_url or f"https://github.com/mock-org/{repo_name}",
             },
-            "summary": "Mock mode: created deterministic GitHub repository record.",
+            "summary": (
+                "Mock mode: created deterministic GitHub repository record."
+                if repo_preference == "create_new_repo"
+                else "Mock mode: attached deterministic existing GitHub repository record."
+            ),
         }
 
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]:
@@ -97,6 +134,7 @@ class InMemoryToolAdapter:
             "repo": repo_name,
             "files": files,
             "commit_sha": "mock-commit-0001",
+            "commit_url": f"https://github.com/mock-org/{repo_name}/commit/mock-commit-0001",
             "summary": "Mock mode: committed generated MVP package files.",
         }
 
@@ -158,8 +196,21 @@ class InMemoryAuditAdapter:
     def __init__(self, model_name: str = "mock-model"):
         self._model_name = model_name
 
-    def write_audit_log(self, node_name: str, message: str, decision_trace: list[str], status: str = "completed") -> AgentStep:
+    def write_audit_log(
+        self,
+        node_name: str,
+        message: str,
+        decision_trace: list[str],
+        status: str = "completed",
+        *,
+        project_id: str | None = None,
+        flight_stage: str | None = None,
+        agent: str | None = None,
+    ) -> AgentStep:
         return AgentStep(
+            project_id=project_id,
+            flight_stage=flight_stage,
+            agent=agent,
             node_name=node_name,
             status=status,
             message=message,

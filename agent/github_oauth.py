@@ -58,6 +58,7 @@ class GitHubConnectionStore(Protocol):
     def get_connection(self, connection_id: str) -> GitHubConnectionRecord: ...
     def get_by_state_hash(self, state_hash: str) -> GitHubConnectionRecord: ...
     def update(self, record: GitHubConnectionRecord) -> GitHubConnectionRecord: ...
+    def delete(self, connection_id: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,11 @@ class InMemoryGitHubConnectionStore:
             raise GitHubOAuthError("GitHub connection was not found.")
         self._connections = {**self._connections, record.id: record}
         return record
+
+    def delete(self, connection_id: str) -> None:
+        self._connections = {
+            key: value for key, value in self._connections.items() if key != connection_id
+        }
 
 
 class SupabaseGitHubConnectionStore:
@@ -149,6 +155,15 @@ class SupabaseGitHubConnectionStore:
         )
         self._raise_for_supabase_error(response, "update GitHub connection")
         return record
+
+    def delete(self, connection_id: str) -> None:
+        response = (
+            self._client.table("github_connections")
+            .delete()
+            .eq("id", connection_id)
+            .execute()
+        )
+        self._raise_for_supabase_error(response, "delete GitHub connection")
 
     @staticmethod
     def _raise_for_supabase_error(response: object, action: str) -> None:
@@ -297,6 +312,27 @@ class GitHubConnectionService:
                 "github_status": "ready",
             },
         )
+
+    def connection_status(self, connection_id: str | None) -> dict[str, object]:
+        if not connection_id:
+            return {"connected": False, "githubConnectionId": None, "username": None}
+        try:
+            record = self._store.get_connection(connection_id)
+        except GitHubOAuthError:
+            return {"connected": False, "githubConnectionId": connection_id, "username": None}
+        connected = record.status in {"ready", "exchanged"}
+        return {
+            "connected": connected,
+            "githubConnectionId": record.id,
+            "username": record.github_login,
+            "status": record.status,
+            "scopes": record.scopes if connected else [],
+        }
+
+    def disconnect(self, connection_id: str | None) -> dict[str, object]:
+        if connection_id:
+            self._store.delete(connection_id)
+        return {"connected": False, "githubConnectionId": None, "username": None}
 
     def _authorization_url(self, state: str) -> str:
         client_id = self._settings.github_oauth_client_id or ""

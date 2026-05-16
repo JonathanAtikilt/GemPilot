@@ -27,12 +27,12 @@ async def test_retrieve_context_indexes_orchestrator_urls_before_build_context(
     )
 
     with patch(
-        "agent.live_adapters.get_build_context",
+        "agent.live_adapters.build_build_context_response",
         new_callable=AsyncMock,
-    ) as mock_get_build_context:
+    ) as mock_build_context:
         from agent.rag.types import BuildContextResponse, ResolvedTechStack
 
-        mock_get_build_context.return_value = BuildContextResponse(
+        mock_build_context.return_value = BuildContextResponse(
             requiredDeliverables=[],
             allowedToolsAndAPIs=[],
             requiredRepositoryFormat=[],
@@ -54,11 +54,12 @@ async def test_retrieve_context_indexes_orchestrator_urls_before_build_context(
     adapter.index_source_urls.assert_awaited_once_with(
         ["https://hackathon.example.com/rules"]
     )
-    mock_get_build_context.assert_awaited_once()
-    call_kwargs = mock_get_build_context.await_args.kwargs
-    assert call_kwargs["optional_params"].sourceUrls == [
+    mock_build_context.assert_awaited_once()
+    request = mock_build_context.await_args.args[0]
+    assert request.optionalParams.sourceUrls == [
         "https://hackathon.example.com/rules"
     ]
+    assert request.contextNeeded
 
     retrieve_step = update["agent_steps"][-1]
     assert any(

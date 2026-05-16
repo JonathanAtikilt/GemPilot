@@ -14,6 +14,8 @@ SECTION_DOC_TYPE_MAP: dict[str, DocType] = {
     "required repository format": "repository_format",
     "required demo format": "demo_format",
     "required tech stack pieces": "tech_stack",
+    "security constraints": "security_constraints",
+    "agent boundaries": "agent_boundaries",
     "scope warnings": "scope_warning",
 }
 

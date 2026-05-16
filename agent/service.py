@@ -126,6 +126,9 @@ class AgentService:
     ) -> dict[str, Any]:
         message = "Workflow failed before the graph could finish."
         step = AgentStep(
+            project_id=detail.task.id,
+            flight_stage="failed",
+            agent="orchestrator",
             node_name="failed",
             status="failed",
             message=message,

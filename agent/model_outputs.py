@@ -23,6 +23,15 @@ class RepoPlanOutput(TracedModelOutput):
     files: list[str] = Field(min_length=1)
     test_plan: list[str] = Field(min_length=1)
     architecture_notes: list[str] = Field(default_factory=list)
+    selected_stack: list[str] = Field(default_factory=list)
+    required_files: list[str] = Field(default_factory=list)
+    repo_structure: list[str] = Field(default_factory=list)
+    implementation_steps: list[str] = Field(default_factory=list)
+    agent_assignments: list[str] = Field(default_factory=list)
+    github_actions_needed: list[str] = Field(default_factory=list)
+    generated_artifacts: list[str] = Field(default_factory=list)
+    security_constraints: list[str] = Field(default_factory=list)
+    demo_requirements: list[str] = Field(default_factory=list)
     mode: ModelOutputMode
 
 

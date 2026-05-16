@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import operator
+import json
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
@@ -48,6 +49,40 @@ from agent.schemas import UploadedSourceFileContent
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
 StepReducer = Annotated[list[AgentStep], operator.add]
+
+NODE_FLIGHT_STAGE: dict[str, str] = {
+    "receive_idea": "preflight",
+    "exchange_github_code": "preflight",
+    "retrieve_context": "radar_scan",
+    "scope_mvp": "flight_plan",
+    "plan_repo": "flight_plan",
+    "create_repo": "autopilot",
+    "generate_files": "autopilot",
+    "commit_progress": "autopilot",
+    "verify_build": "autopilot",
+    "handle_blocker": "autopilot",
+    "generate_final_package": "black_box",
+    "remember_outcome": "black_box",
+    "report_result": "landed",
+    "failed": "failed",
+}
+
+NODE_AGENT: dict[str, str] = {
+    "receive_idea": "orchestrator",
+    "exchange_github_code": "github",
+    "retrieve_context": "rag",
+    "scope_mvp": "orchestrator",
+    "plan_repo": "orchestrator",
+    "create_repo": "github",
+    "generate_files": "orchestrator",
+    "commit_progress": "github",
+    "verify_build": "github",
+    "handle_blocker": "orchestrator",
+    "generate_final_package": "orchestrator",
+    "remember_outcome": "black_box",
+    "report_result": "orchestrator",
+    "failed": "orchestrator",
+}
 
 
 class WorkflowState(TypedDict):
@@ -142,21 +177,29 @@ def build_workflow(
 
     def append_step(
         *,
+        state: WorkflowState | None = None,
         node_name: str,
         message: str,
         decision_trace: list[str],
         status: str = "completed",
     ) -> dict[str, list[AgentStep]]:
+        project_id = state["task_id"] if state else None
+        flight_stage = NODE_FLIGHT_STAGE.get(node_name)
+        agent = NODE_AGENT.get(node_name)
         step = active_audit.write_audit_log(
             node_name=node_name,
             message=message,
             decision_trace=decision_trace,
             status=status,
+            project_id=project_id,
+            flight_stage=flight_stage,
+            agent=agent,
         )
         return {"agent_steps": [step], "graph_trace": [step]}
 
     def append_model_step(
         *,
+        state: WorkflowState | None = None,
         node_name: str,
         message: str,
         result: ModelCallResult,
@@ -165,6 +208,9 @@ def build_workflow(
         extra_trace: list[str] | None = None,
     ) -> dict[str, list[AgentStep]]:
         step = AgentStep(
+            project_id=state["task_id"] if state else None,
+            flight_stage=NODE_FLIGHT_STAGE.get(node_name),
+            agent=NODE_AGENT.get(node_name),
             node_name=node_name,
             status=status,
             message=message,
@@ -181,6 +227,7 @@ def build_workflow(
 
     def receive_idea(state: WorkflowState) -> dict[str, Any]:
         return append_step(
+            state=state,
             node_name="receive_idea",
             message="Received the idea and initialized the Person 1 workflow.",
             decision_trace=[
@@ -199,6 +246,7 @@ def build_workflow(
         if settings.mock_mode:
             return {
                 **append_step(
+                    state=state,
                     node_name="exchange_github_code",
                     message="Mock mode skipped live GitHub OAuth exchange.",
                     decision_trace=[
@@ -214,25 +262,30 @@ def build_workflow(
             }
 
         if not connection_id:
-            reason = "Connect GitHub before running live repo creation."
             return {
                 **append_step(
+                    state=state,
                     node_name="exchange_github_code",
-                    status="failed",
-                    message=reason,
+                    status="completed",
+                    message="No GitHub connection is ready yet; planning can continue before repo actions.",
                     decision_trace=[
                         "Live mode requires a backend-issued github_connection_id.",
-                        "Stopped before RAG, repo creation, or file generation.",
+                        "RAG retrieval and implementation planning can still run.",
+                        "Repository creation will fail safely if GitHub is still disconnected at the action step.",
                     ],
                 ),
-                "status": "failed",
-                "failure_reason": reason,
+                "github_connection": {
+                    "status": "missing",
+                    "connection_id": None,
+                    "login": None,
+                },
             }
 
         if github_connections is None:
             reason = "GitHub connection service is not configured."
             return {
                 **append_step(
+                    state=state,
                     node_name="exchange_github_code",
                     status="failed",
                     message=reason,
@@ -258,6 +311,7 @@ def build_workflow(
             reason = str(exc) or "GitHub OAuth exchange failed."
             return {
                 **append_step(
+                    state=state,
                     node_name="exchange_github_code",
                     status="failed",
                     message=reason,
@@ -272,6 +326,7 @@ def build_workflow(
 
         return {
             **append_step(
+                state=state,
                 node_name="exchange_github_code",
                 message="Exchanged the backend GitHub connection for live repo credentials.",
                 decision_trace=[
@@ -309,6 +364,20 @@ def build_workflow(
             state["task_id"],
             state["idea"],
             optional_params=optional_params,
+            rules_url=frontend_intake.primaryRulesUrl,
+            reference_urls=frontend_intake.additionalUrls,
+            context_needed=[
+                "required_deliverables",
+                "allowed_tools_apis",
+                "required_repository_format",
+                "required_demo_format",
+                "required_tech_stack_pieces",
+                "hackathon_rules",
+                "nvidia_model_usage",
+                "security_constraints",
+                "agent_boundaries",
+                "scope_warnings",
+            ],
             top_k=8,
         )
         uploaded_files = [
@@ -347,6 +416,7 @@ def build_workflow(
 
         return {
             **append_step(
+                state=state,
                 node_name="retrieve_context",
                 message="Retrieved structured RAG build context for the orchestrator.",
                 decision_trace=[
@@ -386,6 +456,7 @@ def build_workflow(
         scope = result.output.model_dump()
         return {
             **append_model_step(
+                state=state,
                 node_name="scope_mvp",
                 message="Scoped the MVP to one judge-friendly workflow.",
                 result=result,
@@ -409,6 +480,7 @@ def build_workflow(
         plan = result.output.model_dump()
         return {
             **append_model_step(
+                state=state,
                 node_name="plan_repo",
                 message="Planned the generated repository package.",
                 result=result,
@@ -417,20 +489,29 @@ def build_workflow(
         }
 
     def create_repo(state: WorkflowState) -> dict[str, Any]:
+        frontend_intake = FrontendIntake.model_validate(
+            state.get("frontend_intake") or {"idea": state["idea"]}
+        )
+        repo_name = frontend_intake.repoName or _repo_name_from_url(frontend_intake.repoUrl)
         tool_call = active_tools.create_repo(
             task_id=state["task_id"],
             visibility=state["repo_visibility"],
+            repo_preference=frontend_intake.repoPreference,
+            repo_name=repo_name,
+            repo_url=frontend_intake.repoUrl,
         )
         update: dict[str, Any] = {
             **append_step(
+                state=state,
                 node_name="create_repo",
                 message=tool_call["summary"],
                 decision_trace=[
                     (
                         "Used mock GitHub adapter instead of a live API call."
                         if state["mock_mode"]
-                        else "Used the connected GitHub account for live repo creation."
+                        else "Used the connected GitHub account for the requested repo action."
                     ),
+                    f"Repository preference: {frontend_intake.repoPreference}.",
                     "Stored repo metadata for later commit steps.",
                 ],
             ),
@@ -472,6 +553,7 @@ def build_workflow(
         ]
         return {
             **append_model_step(
+                state=state,
                 node_name="generate_files",
                 message="Generated README, demo script, and pitch artifacts.",
                 result=result,
@@ -482,17 +564,19 @@ def build_workflow(
 
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
         repo_name = state.get("repo", {}).get("name", "mvpilot-demo")
-        files = [
-            {"path": artifact["name"], "content": f"Mock content for {artifact['name']}"}
-            for artifact in state["generated_artifacts"]
-        ]
-        tool_call = active_tools.commit_files(repo_name=repo_name, files=files, message="Add generated artifacts")
+        files = _files_from_generated_artifacts(state["generated_artifacts"])
+        tool_call = active_tools.commit_files(
+            repo_name=repo_name,
+            files=files,
+            message="Add generated MVPilot project package",
+        )
         update: dict[str, Any] = {
             **append_step(
+                state=state,
                 node_name="commit_progress",
                 message=tool_call["summary"],
                 decision_trace=[
-                    "Committed only generated package files.",
+                    f"Committed {len(files)} generated package file(s).",
                     (
                         "Recorded a deterministic commit SHA for dashboard traceability."
                         if state["mock_mode"]
@@ -518,11 +602,16 @@ def build_workflow(
         status = "completed" if tool_call["status"] == "success" else "blocked"
         return {
             **append_step(
+                state=state,
                 node_name="verify_build",
                 status=status,
                 message=tool_call["summary"],
                 decision_trace=[
-                    "Ran deterministic mock build verification.",
+                    (
+                        "Ran deterministic mock build verification."
+                        if state["mock_mode"]
+                        else "Ran repository health verification against committed files."
+                    ),
                     "Routed recoverable failures through the blocker handler.",
                 ],
             ),
@@ -547,6 +636,7 @@ def build_workflow(
         tool_call = active_tools.recover_build()
         return {
             **append_model_step(
+                state=state,
                 node_name="handle_blocker",
                 message="Recovered from the mock build blocker.",
                 result=result,
@@ -603,11 +693,24 @@ def build_workflow(
         demo_script = demo_result.output.model_dump()
         pitch = pitch_result.output.model_dump()
         source_warnings = _source_warnings(state.get("build_context", {}))
+        last_commit = _last_tool_call(state, "github.commit_files")
+        repo = state.get("repo") or {}
+        commit_url = last_commit.get("commit_url")
+        links = {
+            "repoUrl": repo.get("url"),
+            "commitUrl": commit_url,
+            "branch": "main",
+            "buildLogPath": "docs/BUILD_LOG.md",
+            "architectureDocPath": "docs/ARCHITECTURE.md",
+            "demoScriptPath": "demo/demo_script.md",
+        }
         final_report = {
             "status": "completed",
             "mode": package_mode,
             "model": settings.nemotron_model,
-            "repo": state.get("repo"),
+            "repo": repo,
+            "links": links,
+            "github_result": last_commit or None,
             "summary": (
                 f"{package_mode.title()} mode: Person 1 workflow produced a scoped MVP package with "
                 "retrieval context, generated artifacts, and recovered build proof."
@@ -627,6 +730,7 @@ def build_workflow(
                 f"{package_mode.title()} mode: generated final package report"
                 f" with {len(source_warnings)} source warnings."
             ),
+            "content": json_dumps_safe(final_report),
         }
         combined_result = ModelCallResult(
             output=pitch_result.output,
@@ -646,6 +750,7 @@ def build_workflow(
         )
         return {
             **append_model_step(
+                state=state,
                 node_name="generate_final_package",
                 message="Generated the final package and report.",
                 result=combined_result,
@@ -675,7 +780,11 @@ def build_workflow(
                 "mvp_scope": state.get("mvp_scope"),
                 "repo_plan": state.get("repo_plan"),
                 "blocker_analysis": state.get("blocker_analysis"),
+                "file_tree": [artifact.get("name") for artifact in state.get("generated_artifacts", [])],
                 "generated_artifacts": state.get("generated_artifacts"),
+                "github_result": _last_tool_call(state, "github.commit_files") or _last_tool_call(state, "github.create_repo"),
+                "build_decisions": [step.model_dump(mode="json") for step in state.get("graph_trace", [])],
+                "errors_and_fixes": state.get("blocker_analysis"),
                 "final_report": final_report,
             },
             "tags": ["workflow_outcome"],
@@ -683,10 +792,11 @@ def build_workflow(
         await active_retrieval.write_memory(payload)
         
         return append_step(
+            state=state,
             node_name="remember_outcome",
             message="Stored the outcome for future retrieval.",
             decision_trace=[
-                "Captured recovery pattern as a reusable memory note.",
+                "Captured plan, file tree, GitHub result summary, decisions, and final landing summary.",
                 "Wrote memory to storage.",
             ],
         )
@@ -694,6 +804,7 @@ def build_workflow(
     def report_result(state: WorkflowState) -> dict[str, Any]:
         return {
             **append_step(
+                state=state,
                 node_name="report_result",
                 message="Reported the completed Person 1 workflow result.",
                 decision_trace=[
@@ -714,6 +825,7 @@ def build_workflow(
         }
         return {
             **append_step(
+                state=state,
                 node_name="failed",
                 status="failed",
                 message=reason,
@@ -813,6 +925,45 @@ def _source_warnings(build_context: dict[str, Any]) -> list[dict[str, str]]:
 def _openclaw_trace_from_tool_call(tool_call: dict[str, Any]) -> list[dict[str, Any]]:
     trace = tool_call.get("openclaw_trace", [])
     return [entry for entry in trace if isinstance(entry, dict)]
+
+
+def _files_from_generated_artifacts(artifacts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
+    for artifact in artifacts:
+        path = str(artifact.get("name") or "").strip()
+        if not path or path.endswith("/"):
+            continue
+        if path.split("/")[-1] == ".env":
+            continue
+
+        content = artifact.get("content")
+        if content is None:
+            content = artifact.get("summary", "")
+        if not isinstance(content, str):
+            content = json.dumps(content, indent=2, sort_keys=True)
+        files.append({"path": path, "content": content})
+
+    return files
+
+
+def _last_tool_call(state: WorkflowState, tool_name: str) -> dict[str, Any]:
+    for call in reversed(state.get("tool_calls", [])):
+        raw_result = call.get("raw_result") if isinstance(call, dict) else None
+        raw_tool_name = raw_result.get("tool_name") if isinstance(raw_result, dict) else None
+        if call.get("tool") == tool_name or raw_tool_name == tool_name:
+            return call
+    return {}
+
+
+def _repo_name_from_url(repo_url: str | None) -> str | None:
+    if not repo_url:
+        return None
+    name = repo_url.rstrip("/").split("/")[-1].strip()
+    return name or None
+
+
+def json_dumps_safe(value: dict[str, Any]) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, default=str)
 
 
 def route_after_tool_result(state: dict[str, Any]) -> str:

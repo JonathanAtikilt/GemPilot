@@ -56,7 +56,7 @@ The ingester reads `.md` and `.txt` files from:
 
 It also scrapes web pages (seed URL plus **first-level, same-domain links only**) from:
 
-- **Orchestrator intake** — `primary_rules_url` / `additional_urls` on `POST /agent/run` are scraped in `retrieve_context` before search (preferred for per-task rules).
+- **Orchestrator intake** — `rulesUrl` / `referenceUrls` on `POST /api/orchestrator/start-project` are scraped in `retrieve_context` before search (preferred for per-task rules). Backward-compatible `primary_rules_url` / `additional_urls` are still accepted.
 - **Static config** — `RAG_SCRAPE_URLS` in `.env` and/or `rag/scrape_urls.txt` (used by `POST /rag/ingest`).
 
 It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dimensions, and stores them in Supabase.
@@ -81,7 +81,7 @@ The Nemotron workflow always uses live RAG via `LiveRagMemoryAdapter` in the `re
 
 - Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `NVIDIA_API_KEY`
 - Run `POST /rag/ingest` before agent tasks so indexed chunks exist
-- No mock defaults or degraded paths: missing config or failed embed/rerank/search raises an error; empty categories mean retrieval found no matching evidence
+- Missing Supabase or NVIDIA configuration returns a clear backend configuration error. If retrieval runs but returns weak or empty evidence, `/rag/get-build-context` fills safe MVPilot fallback categories and marks them as default assumptions.
 
 Direct helper (also used by `POST /rag/get-build-context`):
 
@@ -98,7 +98,7 @@ context = await get_build_context(
 ## Agent Endpoints
 
 - `POST /rag/get-build-context`: Orchestrator calls this before planning. Returns structured deliverables, tools, repo/demo format, tech stack, scope warnings, and evidence.
-- `POST /rag/answer-context`: Orchestrator calls this before scope or next-action decisions. It returns context and a short evidence summary, not a final decision.
+- `POST /rag/answer-context`: Backward-compatible evidence endpoint. Prefer `/rag/get-build-context` for orchestrator planning.
 - `POST /rag/reindex-logs`: GitHub/build-log agent calls this after new commits, build output, or errors.
 - `GET /rag/sources`: Frontend calls this to show indexed sources and chunk counts.
 - `POST /rag/search`: Frontend and agents call this to show evidence for user questions.

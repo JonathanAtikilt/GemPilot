@@ -45,12 +45,12 @@ async def test_live_rag_memory_adapter():
 async def test_live_rag_memory_adapter_retrieve_build_context():
     adapter = LiveRagMemoryAdapter()
     with patch(
-        "agent.live_adapters.get_build_context",
+        "agent.live_adapters.build_build_context_response",
         new_callable=AsyncMock,
-    ) as mock_get_build_context:
+    ) as mock_build_context:
         from agent.rag.types import BuildContextItem, BuildContextResponse, ResolvedTechStack
 
-        mock_get_build_context.return_value = BuildContextResponse(
+        mock_build_context.return_value = BuildContextResponse(
             requiredDeliverables=[
                 BuildContextItem(
                     item="Working MVP",
@@ -77,14 +77,14 @@ async def test_live_rag_memory_adapter_retrieve_build_context():
         payload = await adapter.retrieve_build_context("task-1", "hackathon agent idea")
         assert payload["mode"] == "live"
         assert payload["requiredDeliverables"][0]["item"] == "Working MVP"
-        mock_get_build_context.assert_awaited_once()
+        mock_build_context.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_live_rag_memory_adapter_build_context_raises_without_rag_config():
     adapter = LiveRagMemoryAdapter()
     with patch(
-        "agent.live_adapters.get_build_context",
+        "agent.live_adapters.build_build_context_response",
         new_callable=AsyncMock,
         side_effect=RagConfigurationError("missing config"),
     ):
@@ -147,6 +147,7 @@ def test_live_tool_adapter():
             files=[{"path": "a.txt", "content": "x"}],
             message="msg",
             config=github_config,
+            allow_existing_repo=False,
         )
 
     with patch("agent.live_adapters.check_repo_health") as mock_check:
@@ -161,7 +162,11 @@ def test_live_tool_adapter():
         assert res["status"] == "success"
         assert res["healthy"] is True
         assert res["raw_result"]["tool_name"] == "github.check_repo_health"
-        mock_check.assert_called_with("repo", config=github_config)
+        mock_check.assert_called_with(
+            "repo",
+            config=github_config,
+            allow_existing_repo=False,
+        )
 
     with patch("agent.live_adapters.detect_blocker") as mock_detect:
         mock_detect.return_value = {
