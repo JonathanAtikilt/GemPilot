@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import uuid4
 
+import certifi
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -238,7 +239,6 @@ class GitHubConnectionService:
         *,
         task_id: str,
     ) -> GitHubWorkflowAuth:
-        self._require_oauth_configured()
         record = self._store.get_connection(connection_id)
         if record.status == "exchanged" and record.encrypted_access_token and record.github_login:
             token = self.decrypt_access_token(record)
@@ -248,6 +248,8 @@ class GitHubConnectionService:
                 scopes=list(record.scopes),
                 config=_github_config(token, record.github_login),
             )
+
+        self._require_oauth_configured()
 
         if record.status != "ready" or not record.encrypted_pending_code:
             self._mark_failed(record, "GitHub connection is not ready for token exchange.")
@@ -356,6 +358,13 @@ class GitHubConnectionService:
         return {
             "oauthConfigured": self._settings.github_oauth_configured,
             "patConfigured": self._settings.github_pat_configured,
+            "patTokenType": self._settings.github_pat_token_type,
+            "canCreateRepositories": self._settings.github_pat_can_create_repositories,
+            "recommendedRepoPreference": (
+                "use_existing_repo"
+                if self._settings.github_pat_token_type == "fine_grained"
+                else "create_new_repo"
+            ),
             "redirectUri": self._settings.github_oauth_redirect_uri,
             "missingEnv": self._missing_oauth_env(),
         }
@@ -415,7 +424,7 @@ class GitHubConnectionService:
 
     async def _exchange_code(self, code: str) -> dict[str, object]:
         secret = self._settings.github_oauth_client_secret
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, verify=certifi.where()) as client:
             response = await client.post(
                 GITHUB_TOKEN_URL,
                 headers={"Accept": "application/json"},
@@ -434,7 +443,7 @@ class GitHubConnectionService:
         return payload
 
     async def _fetch_user(self, token: str) -> dict[str, object]:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, verify=certifi.where()) as client:
             response = await client.get(
                 GITHUB_USER_URL,
                 headers={

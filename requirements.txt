@@ -5,6 +5,7 @@ pydantic
 python-multipart
 supabase
 httpx
+certifi
 cryptography
 beautifulsoup4
 pytest

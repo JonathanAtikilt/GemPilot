@@ -9,6 +9,7 @@ from agent.rag.retrieve import search_rag
 from agent.rag.types import BuildContextOptionalParams, BuildContextRequest
 from tools.github_tool import create_repo, commit_files
 from tools.github_tool import GitHubConfig
+from tools.policy import normalize_generated_repo_name
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
 from tools.verifier import verify_commit
@@ -134,8 +135,9 @@ class LiveToolAdapter:
                 "summary": "Using the connected existing GitHub repository.",
             }
         self._allow_existing_repo = False
+        normalized_repo_name = normalize_generated_repo_name(repo_name, task_id=task_id)
         raw_result = create_repo(
-            repo_name=repo_name or f"mvpilot-generated-{task_id[:8]}",
+            repo_name=normalized_repo_name,
             description="Generated MVP",
             visibility=visibility,
             config=self._github_config,

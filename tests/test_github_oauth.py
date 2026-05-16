@@ -169,3 +169,23 @@ async def test_exchange_ready_connection_stores_token_and_clears_pending_code():
     assert record.encrypted_access_token != "gho-task-token"
     assert record.github_login == "octocat"
     assert record.github_user_id == 12345
+
+
+@pytest.mark.asyncio
+async def test_exchange_env_token_connection_does_not_require_oauth_app():
+    key = Fernet.generate_key().decode("utf-8")
+    settings = Settings(
+        _env_file=None,
+        adapter_mode="live",
+        github_personal_access_token="ghp-env-token",
+        github_owner="octocat",
+        github_token_encryption_key=key,
+    )
+    service = GitHubConnectionService(settings=settings, store=InMemoryGitHubConnectionStore())
+    record = service.create_env_token_connection("http://localhost:3000")
+
+    auth = await service.exchange_for_workflow(record.id, task_id="task-env")
+
+    assert auth.login == "octocat"
+    assert auth.config.token == "ghp-env-token"
+    assert auth.config.owner == "octocat"

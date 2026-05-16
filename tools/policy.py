@@ -35,6 +35,29 @@ def repo_prefix() -> str:
     return os.getenv("GITHUB_REPO_PREFIX", DEFAULT_REPO_PREFIX)
 
 
+def normalize_generated_repo_name(
+    repo_name: str | None,
+    *,
+    task_id: str | None = None,
+) -> str:
+    """Ensure user-supplied names satisfy the generated-repo prefix policy."""
+
+    prefix = repo_prefix()
+    fallback = f"{prefix}{(task_id or 'demo')[:8]}"
+    name = (repo_name or fallback).strip()
+    if not name:
+        return fallback
+    if name.startswith(prefix):
+        return name
+    if name.startswith("mvpilot-") and not name.startswith(prefix):
+        name = prefix + name[len("mvpilot-") :]
+    elif not name.startswith(prefix):
+        name = f"{prefix}{name}"
+    if not _REPO_NAME_RE.fullmatch(name):
+        return fallback
+    return name
+
+
 def validate_action(action: str) -> ToolResult | None:
     normalized = action.strip().lower()
     if normalized in BLOCKED_ACTIONS:

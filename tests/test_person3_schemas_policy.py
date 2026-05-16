@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from tools.policy import validate_action, validate_generated_repo_name, validate_github_mutation
+from tools.policy import (
+    normalize_generated_repo_name,
+    validate_action,
+    validate_generated_repo_name,
+    validate_github_mutation,
+)
 from tools.schemas import CommitFilesRequest, FilePayload, MAX_TEXT_FILE_BYTES, ToolResult
 
 
@@ -54,6 +59,12 @@ class Person3SchemasPolicyTests(unittest.TestCase):
         result = validate_generated_repo_name("mvpilot-generated-referral-agent")
 
         self.assertIsNone(result)
+
+    def test_normalize_generated_repo_name_maps_frontend_default(self):
+        normalized = normalize_generated_repo_name("mvpilot-demo", task_id="task-12345678")
+
+        self.assertEqual(normalized, "mvpilot-generated-demo")
+        self.assertIsNone(validate_generated_repo_name(normalized))
 
     def test_policy_rejects_blocked_action(self):
         result = validate_action("delete_repo")

@@ -500,10 +500,12 @@ def build_workflow(
             repo_name=repo_name,
             repo_url=frontend_intake.repoUrl,
         )
+        repo_step_status = "completed" if tool_call["status"] == "success" else "failed"
         update: dict[str, Any] = {
             **append_step(
                 state=state,
                 node_name="create_repo",
+                status=repo_step_status,
                 message=tool_call["summary"],
                 decision_trace=[
                     (
@@ -512,7 +514,11 @@ def build_workflow(
                         else "Used the connected GitHub account for the requested repo action."
                     ),
                     f"Repository preference: {frontend_intake.repoPreference}.",
-                    "Stored repo metadata for later commit steps.",
+                    (
+                        "Stored repo metadata for later commit steps."
+                        if tool_call["status"] == "success"
+                        else "Repository creation failed; workflow stopped before file generation."
+                    ),
                 ],
             ),
             "repo": tool_call["repo"],

@@ -207,6 +207,24 @@ class Settings(BaseSettings):
         )
 
     @property
+    def github_pat_token_type(self) -> str | None:
+        if not self._secret_has_value(self.github_personal_access_token):
+            return None
+        token = self.github_personal_access_token.get_secret_value().strip()
+        if token.startswith("github_pat_"):
+            return "fine_grained"
+        if token.startswith("ghp_"):
+            return "classic"
+        return "unknown"
+
+    @property
+    def github_pat_can_create_repositories(self) -> bool:
+        token_type = self.github_pat_token_type
+        if token_type == "fine_grained":
+            return False
+        return self.github_pat_configured and token_type in {"classic", "unknown", None}
+
+    @property
     def rag_live_ready(self) -> bool:
         return self.nvidia_configured and self.supabase_configured
 

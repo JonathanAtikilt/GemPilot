@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 
 from tools import mock_store
 from tools.build_checker import check_repo_health
@@ -34,6 +35,27 @@ class Person3GitHubToolTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             client.get_authenticated_user()
+
+    def test_client_uses_certifi_ssl_context_for_live_requests(self):
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(request, timeout=20, context=None):
+            captured["context"] = context
+            raise URLError("stop")
+
+        client = GitHubClient(
+            GitHubConfig(
+                token="secret-token",
+                owner="owner",
+                repo_prefix="mvpilot-generated-",
+                mock_tools=False,
+            )
+        )
+        with patch("tools.github_tool.urlopen", fake_urlopen):
+            with self.assertRaises(RuntimeError):
+                client.get_authenticated_user()
+
+        self.assertIsNotNone(captured.get("context"))
 
     def test_create_repo_uses_mock_mode_without_credentials(self):
         with patch.dict(
@@ -220,6 +242,57 @@ class Person3GitHubToolTests(unittest.TestCase):
             "mvpilot-generated-demo",
             "new-commit-sha",
             config=config,
+        )
+
+    def test_commit_files_seeds_initial_commit_for_empty_repository(self):
+        config = GitHubConfig(
+            token="task-token",
+            owner="connected-owner",
+            repo_prefix="mvpilot-generated-",
+            mock_tools=False,
+        )
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "env-token",
+                    "GITHUB_OWNER": "env-owner",
+                    "MVPILOT_MOCK_TOOLS": "false",
+                },
+                clear=True,
+            ),
+            patch("tools.github_tool.GitHubClient") as client_class,
+            patch("tools.verifier.verify_commit") as verify_mock,
+        ):
+            client = client_class.return_value
+            client.get_repo.return_value = {"default_branch": "main", "size": 0}
+            client.create_blob.return_value = {"sha": "blob-sha"}
+            client.create_tree.return_value = {"sha": "new-tree-sha"}
+            client.create_commit.return_value = {"sha": "new-commit-sha"}
+            client.create_ref.return_value = {"ref": "refs/heads/main", "object": {"sha": "new-commit-sha"}}
+            verify_mock.return_value = {
+                "tool_name": "github.verify_commit",
+                "status": "success",
+                "verification_status": "verified",
+                "output": {"commit_sha": "new-commit-sha"},
+                "error": None,
+            }
+
+            result = commit_files(
+                "my-existing-repo",
+                [{"path": "README.md", "content": "# Demo"}],
+                "Add generated MVPilot package",
+                config=config,
+                allow_existing_repo=True,
+            )
+
+        self.assertEqual(result["status"], "success")
+        client.get_ref.assert_not_called()
+        client.create_ref.assert_called_once_with("my-existing-repo", "main", "new-commit-sha")
+        client.create_commit.assert_called_once_with(
+            "my-existing-repo",
+            "Add generated MVPilot package",
+            "new-tree-sha",
         )
 
     def test_commit_files_rejects_empty_file_list(self):

@@ -126,6 +126,24 @@ def test_live_tool_adapter():
             config=github_config,
         )
 
+    with patch("agent.live_adapters.create_repo") as mock_create_repo:
+        mock_create_repo.return_value = {
+            "tool_name": "github.create_repo",
+            "status": "success",
+            "output": {"repo_name": "mvpilot-generated-demo"},
+        }
+        adapter.create_repo(
+            "task_12345678",
+            "public",
+            repo_name="mvpilot-demo",
+        )
+        mock_create_repo.assert_called_with(
+            repo_name="mvpilot-generated-demo",
+            description="Generated MVP",
+            visibility="public",
+            config=github_config,
+        )
+
     with patch("agent.live_adapters.commit_files") as mock_commit:
         mock_commit.return_value = {
             "tool_name": "github.commit_files",

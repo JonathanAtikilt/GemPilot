@@ -105,6 +105,9 @@ const sourceTypes = [
 type GithubOAuthConfig = {
   oauthConfigured: boolean;
   patConfigured: boolean;
+  patTokenType?: string | null;
+  canCreateRepositories?: boolean;
+  recommendedRepoPreference?: RepoPreference;
   redirectUri?: string;
   missingEnv?: string[];
 };
@@ -138,6 +141,28 @@ function readGithubCallbackState(): {
 function githubReturnTo() {
   if (typeof window === "undefined") return "http://localhost:3000";
   return `${window.location.origin}${window.location.pathname}`;
+}
+
+function formatWorkflowError(message: string): string {
+  if (message.includes("Resource not accessible by personal access token")) {
+    return [
+      "GitHub rejected repo creation: this token cannot create new repositories.",
+      "Your GITHUB_TOKEN looks like a fine-grained PAT (github_pat_…). Those cannot call POST /user/repos.",
+      "Use “Use existing repo” and paste a repo URL you own, with Contents read/write on that repo.",
+      "Or replace GITHUB_TOKEN with a classic PAT (ghp_…) that has the repo scope, then restart the backend and Use backend token again.",
+    ].join(" ");
+  }
+  if (message.includes("already exists") || message.includes("name already exists")) {
+    return `${message} Pick a different repo name and launch again.`;
+  }
+  if (message.includes("Git Repository is empty") || message.includes("repository is empty")) {
+    return [
+      "The existing GitHub repo has no commits yet.",
+      "MVPilot will now seed an initial commit automatically — click New launch and try again.",
+      "Or add any file (e.g. README) on github.com first, then relaunch.",
+    ].join(" ");
+  }
+  return message;
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -210,7 +235,7 @@ export default function Home() {
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
   const [repoPreference, setRepoPreference] = useState<RepoPreference>("create_new_repo");
-  const [requestedRepoName, setRequestedRepoName] = useState("mvpilot-demo");
+  const [requestedRepoName, setRequestedRepoName] = useState("mvpilot-generated-demo");
   const [existingRepoUrl, setExistingRepoUrl] = useState("");
   const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
@@ -234,16 +259,29 @@ export default function Home() {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
+    const storedTaskId = window.sessionStorage.getItem("mvpilot_task_id");
+    if (storedTaskId) {
+      setTaskId(storedTaskId);
+      setSubmitState("sent");
+      setMessage("Resuming flight telemetry for your in-progress run…");
+    }
+
     if (!apiBaseUrl) return;
 
     fetch(`${apiBaseUrl}/api/auth/github/config`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((config) => {
         if (!config) return;
-        setGithubOAuthConfig(config as GithubOAuthConfig);
-        if (!connectionId && !error && config.patConfigured && !config.oauthConfigured) {
+        const typed = config as GithubOAuthConfig;
+        setGithubOAuthConfig(typed);
+        if (typed.recommendedRepoPreference === "use_existing_repo") {
+          setRepoPreference("use_existing_repo");
+        }
+        if (!connectionId && !error && typed.patConfigured && !typed.oauthConfigured) {
           setGithubMessage(
-            "GitHub OAuth app is not configured on the backend. Use “Use backend token” or set GITHUB_OAUTH_* in .env.",
+            typed.canCreateRepositories === false
+              ? "Fine-grained PAT detected: use “Use existing repo” (create new repo needs a classic ghp_ token with repo scope)."
+              : "GitHub OAuth app is not configured on the backend. Use “Use backend token” or set GITHUB_OAUTH_* in .env.",
           );
         }
       })
@@ -251,7 +289,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!taskId || !process.env.NEXT_PUBLIC_AGENT_API_URL || submitState === "idle" || submitState === "error") {
+    if (!taskId || !process.env.NEXT_PUBLIC_AGENT_API_URL || submitState === "idle") {
       return;
     }
 
@@ -273,7 +311,12 @@ export default function Home() {
         }
         if (status === "failed") {
           setSubmitState("error");
-          setMessage(detail.final_report?.summary || "Workflow failed. Check the failed flight-stage event below.");
+          const failedStep = detail.agent_steps.find((step) => step.status === "failed");
+          const rawMessage =
+            failedStep?.message
+            || detail.final_report?.summary
+            || "Workflow failed. Check the failed flight-stage event below.";
+          setMessage(formatWorkflowError(rawMessage));
           return;
         }
       } catch {
@@ -315,8 +358,9 @@ export default function Home() {
     [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectTitle, repoPreference, requestedRepoName, visibility],
   );
 
-  const hasLaunched = submitState !== "idle" && submitState !== "error";
-  const stageState = deriveFlightStageState(taskDetail, hasLaunched, submitState === "error");
+  const hasLaunched = Boolean(taskId);
+  const runFailed = submitState === "error";
+  const stageState = deriveFlightStageState(taskDetail, hasLaunched, runFailed);
   const progressPercent = stageState.progressPercent;
   const activeStopIndex = stageState.activeStopIndex;
   const steps = stageState.steps;
@@ -380,6 +424,14 @@ export default function Home() {
     setGithubMessage(
       payload.username ? `Using backend GITHUB_TOKEN as ${payload.username}.` : "Using backend GITHUB_TOKEN for this session.",
     );
+  }
+
+  function resetFlight() {
+    setTaskId(null);
+    setTaskDetail(null);
+    setSubmitState("idle");
+    setMessage("Ready for preflight. Add the build brief and launch MVPilot.");
+    window.sessionStorage.removeItem("mvpilot_task_id");
   }
 
   async function disconnectGitHub() {
@@ -514,7 +566,9 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setTaskId(data.task_id ?? data.id ?? "sent-without-task-id");
+      const launchedTaskId = data.task_id ?? data.id ?? "sent-without-task-id";
+      setTaskId(launchedTaskId);
+      window.sessionStorage.setItem("mvpilot_task_id", launchedTaskId);
       setSubmitState("sent");
       setMessage("MVPilot is airborne. Polling live flight telemetry from the orchestrator.");
     } catch (error) {
@@ -614,7 +668,8 @@ export default function Home() {
                     {repoPreference === "create_new_repo" ? (
                       <label className="mt-3 block">
                         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Repo name</span>
-                        <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                        <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} placeholder="mvpilot-generated-your-idea" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                        <p className="mt-1 font-mono text-[10px] text-[#849495]">Must start with mvpilot-generated- (mvpilot-demo is auto-corrected).</p>
                       </label>
                     ) : (
                       <label className="mt-3 block">
@@ -695,13 +750,26 @@ export default function Home() {
                 <div className="rounded-lg border border-[#00f2ff]/15 bg-[#0f131c]/85 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Autopilot Active</p>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">
+                        {runFailed ? "Flight aborted" : "Autopilot Active"}
+                      </p>
                       <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">{payloadPreview.title}</h2>
-                      <p className="mt-2 max-w-3xl font-mono text-xs leading-5 text-[#b9cacb]">{message}</p>
+                      <p className={`mt-2 max-w-3xl font-mono text-xs leading-5 ${runFailed ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{message}</p>
                     </div>
-                    <div className="text-left lg:text-right">
-                      <p className="font-mono text-4xl font-bold text-[#00f2ff]">{progressPercent}%</p>
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">Completion</p>
+                    <div className="flex flex-col items-start gap-3 lg:items-end">
+                      <div className="text-left lg:text-right">
+                        <p className="font-mono text-4xl font-bold text-[#00f2ff]">{progressPercent}%</p>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">Completion</p>
+                      </div>
+                      {runFailed ? (
+                        <button
+                          type="button"
+                          onClick={resetFlight}
+                          className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10"
+                        >
+                          New launch
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 

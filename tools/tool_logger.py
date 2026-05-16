@@ -10,6 +10,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from tools.http_ssl import default_ssl_context
+
 from tools.schemas import ToolResult
 
 
@@ -54,7 +56,7 @@ def _post_supabase(table: str, row: dict[str, Any]) -> None:
         },
     )
     try:
-        with urlopen(request, timeout=10):
+        with urlopen(request, timeout=10, context=default_ssl_context()):
             return
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:500]
