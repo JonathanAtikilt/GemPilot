@@ -103,8 +103,22 @@ def test_github_callback_requires_known_state():
     assert "raw-oauth-code" not in location
 
 
-def test_github_callback_stores_encrypted_code_and_redirects_safely():
+@respx.mock
+def test_github_callback_exchanges_token_and_redirects_safely():
     app = create_app(settings=github_settings())
+    respx.post("https://github.com/login/oauth/access_token").mock(
+        return_value=Response(
+            200,
+            json={
+                "access_token": "gho-task-token",
+                "scope": "repo,read:user,user:email",
+                "token_type": "bearer",
+            },
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(200, json={"login": "octocat", "id": 12345})
+    )
 
     with TestClient(app) as client:
         connect_response = client.get(
@@ -124,14 +138,17 @@ def test_github_callback_stores_encrypted_code_and_redirects_safely():
 
     callback_query = parse_qs(urlparse(callback_response.headers["location"]).query)
     connection_id = callback_query["github_connection_id"][0]
-    assert callback_query["github_status"] == ["ready"]
+    assert callback_query["github_status"] == ["connected"]
+    assert callback_query["github_username"] == ["octocat"]
 
     record = app.state.github_connection_store.get_connection(connection_id)
-    assert record.status == "ready"
-    assert record.encrypted_pending_code
-    assert record.encrypted_pending_code != "raw-oauth-code"
-    assert record.encrypted_access_token is None
-    assert app.state.github_connection_service.decrypt_pending_code(record) == "raw-oauth-code"
+    assert record.status == "exchanged"
+    assert record.encrypted_pending_code is None
+    assert record.encrypted_access_token
+    assert record.encrypted_access_token != "gho-task-token"
+    assert app.state.github_connection_service.decrypt_access_token(record) == "gho-task-token"
+    assert record.github_login == "octocat"
+    assert record.github_user_id == 12345
 
 
 @pytest.mark.asyncio
@@ -178,6 +195,7 @@ async def test_exchange_env_token_connection_does_not_require_oauth_app():
     settings = Settings(
         _env_file=None,
         adapter_mode="live",
+        github_env_token_fallback_enabled=True,
         github_personal_access_token="ghp-env-token",
         github_owner="octocat",
         github_token_encryption_key=key,
@@ -205,6 +223,7 @@ async def test_exchange_env_token_connection_refreshes_token_from_settings():
     settings = Settings(
         _env_file=None,
         adapter_mode="live",
+        github_env_token_fallback_enabled=True,
         github_personal_access_token="ghp-old-token",
         github_owner="octocat",
         github_token_encryption_key=key,
@@ -224,6 +243,7 @@ async def test_exchange_env_token_connection_refreshes_token_from_settings():
         settings=Settings(
             _env_file=None,
             adapter_mode="live",
+            github_env_token_fallback_enabled=True,
             github_personal_access_token="ghp-new-token",
             github_owner="octocat",
             github_token_encryption_key=key,

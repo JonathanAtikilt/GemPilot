@@ -39,6 +39,7 @@ from agent.frontend_intake import (
     build_optional_params_from_frontend_intake,
     build_source_context,
 )
+from agent.generated_project import merge_with_project_artifacts, title_from_idea
 from agent.github_oauth import GitHubConnectionService, GitHubOAuthError
 from agent.live_adapters import LiveRagMemoryAdapter
 from tools.build_checker import merge_repo_health_scaffold
@@ -263,18 +264,23 @@ def build_workflow(
             }
 
         if not connection_id:
+            reason = (
+                "GitHub is not connected. Use Connect GitHub on the website before launching "
+                "so the backend receives a github_connection_id."
+            )
             return {
                 **append_step(
                     state=state,
                     node_name="exchange_github_code",
-                    status="completed",
-                    message="No GitHub connection is ready yet; planning can continue before repo actions.",
+                    status="failed",
+                    message=reason,
                     decision_trace=[
                         "Live mode requires a backend-issued github_connection_id.",
-                        "RAG retrieval and implementation planning can still run.",
-                        "Repository creation will fail safely if GitHub is still disconnected at the action step.",
+                        "Stopped before RAG planning because repo actions need an authenticated user.",
                     ],
                 ),
+                "status": "failed",
+                "failure_reason": reason,
                 "github_connection": {
                     "status": "missing",
                     "connection_id": None,
@@ -494,11 +500,17 @@ def build_workflow(
             state.get("frontend_intake") or {"idea": state["idea"]}
         )
         repo_name = frontend_intake.repoName or _repo_name_from_url(frontend_intake.repoUrl)
+        repo_description = (
+            frontend_intake.repoDescription
+            or frontend_intake.title
+            or f"Generated MVPilot project for: {state['idea'][:120]}"
+        )
         tool_call = active_tools.create_repo(
             task_id=state["task_id"],
             visibility=state["repo_visibility"],
             repo_preference=frontend_intake.repoPreference,
             repo_name=repo_name,
+            repo_description=repo_description,
             repo_url=frontend_intake.repoUrl,
         )
         repo_step_status = "completed" if tool_call["status"] == "success" else "failed"
@@ -546,6 +558,17 @@ def build_workflow(
             reasoning_effort="low",
         )
         manifest = result.output.model_dump()
+        frontend_intake = FrontendIntake.model_validate(
+            state.get("frontend_intake") or {"idea": state["idea"]}
+        )
+        manifest["artifacts"] = merge_with_project_artifacts(
+            manifest["artifacts"],
+            idea=state["idea"],
+            title=frontend_intake.title or title_from_idea(state["idea"]),
+            resolved_stack=_resolved_stack_summary(state.get("build_context", {})),
+            repo_plan=state.get("repo_plan", {}),
+            source_warnings=_source_warnings(state.get("build_context", {})),
+        )
         artifacts = [
             {
                 **artifact,
@@ -562,7 +585,7 @@ def build_workflow(
             **append_model_step(
                 state=state,
                 node_name="generate_files",
-                message="Generated README, demo script, and pitch artifacts.",
+                message="Generated runnable frontend, backend, database, test, docs, and demo files.",
                 result=result,
             ),
             "generated_artifacts": artifacts,
@@ -956,6 +979,16 @@ def _source_warnings(build_context: dict[str, Any]) -> list[dict[str, str]]:
     source_context = build_context.get("sourceContext", {})
     warnings = source_context.get("warnings") if isinstance(source_context, dict) else []
     return [warning for warning in warnings if isinstance(warning, dict)]
+
+
+def _resolved_stack_summary(build_context: dict[str, Any]) -> str:
+    resolved_stack = build_context.get("resolvedTechStack", {})
+    items = resolved_stack.get("items") if isinstance(resolved_stack, dict) else None
+    if isinstance(items, list):
+        stack_items = [str(item).strip() for item in items if str(item).strip()]
+        if stack_items:
+            return ", ".join(stack_items)
+    return "React, FastAPI, Supabase Postgres, Pytest"
 
 
 def _openclaw_trace_from_tool_call(tool_call: dict[str, Any]) -> list[dict[str, Any]]:

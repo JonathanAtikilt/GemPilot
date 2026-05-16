@@ -134,6 +134,7 @@ async def _read_form_payload(request: Request) -> dict[str, Any]:
         "repo_visibility": form.get("repo_visibility") or form.get("visibility") or "public",
         "repo_preference": form.get("repo_preference") or form.get("repoPreference") or "create_new_repo",
         "repo_name": form.get("repo_name") or form.get("repoName"),
+        "repo_description": form.get("repo_description") or form.get("repoDescription"),
         "repo_url": form.get("repo_url") or form.get("repoUrl"),
         "branch": form.get("branch") or "main",
         "demo_mode": form.get("demo_mode") or False,

@@ -67,6 +67,7 @@ class OpenClawToolAdapter:
         *,
         repo_preference: str = "create_new_repo",
         repo_name: str | None = None,
+        repo_description: str | None = None,
         repo_url: str | None = None,
     ) -> dict[str, Any]:
         return self._with_openclaw_trace(
@@ -76,6 +77,7 @@ class OpenClawToolAdapter:
                 visibility=visibility,
                 repo_preference=repo_preference,
                 repo_name=repo_name,
+                repo_description=repo_description,
                 repo_url=repo_url,
             ),
         )

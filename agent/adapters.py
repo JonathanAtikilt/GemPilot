@@ -29,6 +29,7 @@ class ToolAdapter(Protocol):
         *,
         repo_preference: str = "create_new_repo",
         repo_name: str | None = None,
+        repo_description: str | None = None,
         repo_url: str | None = None,
     ) -> dict[str, Any]: ...
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]: ...
@@ -105,8 +106,10 @@ class InMemoryToolAdapter:
         *,
         repo_preference: str = "create_new_repo",
         repo_name: str | None = None,
+        repo_description: str | None = None,
         repo_url: str | None = None,
     ) -> dict[str, Any]:
+        del repo_description
         repo_name = repo_name or f"mvpilot-demo-{task_id[:8]}"
         return {
             "tool": "github.create_repo" if repo_preference == "create_new_repo" else "github.use_existing_repo",

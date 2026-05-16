@@ -48,6 +48,7 @@ class FrontendIntake(BaseModel):
     additionalUrls: list[str] = Field(default_factory=list)
     repoPreference: str = "create_new_repo"
     repoName: str | None = None
+    repoDescription: str | None = None
     repoUrl: str | None = None
     visibility: str = "public"
     branch: str = "main"
@@ -62,6 +63,7 @@ class FrontendIntake(BaseModel):
         "primaryRulesUrl",
         "repoPreference",
         "repoName",
+        "repoDescription",
         "repoUrl",
         "visibility",
         "branch",
@@ -108,6 +110,7 @@ def build_frontend_intake_from_request(request: RunAgentRequest) -> FrontendInta
         additionalUrls=request.additional_urls,
         repoPreference=request.repo_preference,
         repoName=request.repo_name,
+        repoDescription=request.repo_description,
         repoUrl=request.repo_url,
         visibility=request.repo_visibility,
         branch=request.branch,
@@ -128,6 +131,7 @@ def build_frontend_intake_from_task(task: TaskRecord) -> FrontendIntake:
         additionalUrls=task.additional_urls,
         repoPreference=task.repo_preference,
         repoName=task.repo_name,
+        repoDescription=task.repo_description,
         repoUrl=task.repo_url,
         visibility=task.repo_visibility,
         branch=task.branch,
@@ -148,6 +152,7 @@ def build_optional_params_from_frontend_intake(
         optional_params["repoPreference"] = "GitHub-connected repository handoff"
     optional_params["repoPreference"] = intake.repoPreference
     optional_params["repoName"] = intake.repoName
+    optional_params["repoDescription"] = intake.repoDescription
     optional_params["repoUrl"] = intake.repoUrl
     optional_params["visibility"] = intake.visibility
     return optional_params or None

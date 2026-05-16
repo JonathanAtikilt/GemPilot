@@ -49,6 +49,7 @@ def test_frontend_intake_normalizes_request_fields() -> None:
         "githubConnectionId": "gh_conn_123",
         "repoPreference": "create_new_repo",
         "repoName": None,
+        "repoDescription": None,
         "repoUrl": None,
         "visibility": "public",
         "branch": "main",

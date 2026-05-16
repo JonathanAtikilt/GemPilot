@@ -244,11 +244,15 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     assert data["approvals"] == []
     assert {artifact["name"] for artifact in data["generated_artifacts"]} >= {
         "README.md",
-        "src/app.py",
-        "src/core/agent.py",
-        "tests/test_app.py",
+        "package.json",
+        "src/App.jsx",
+        "backend/main.py",
+        "backend/mvp_engine.py",
+        "tests/test_backend.py",
         "docs/ARCHITECTURE.md",
         "docs/BUILD_LOG.md",
+        "docs/DATABASE_SCHEMA.sql",
+        "docs/IMPLEMENTATION_PLAN.md",
         "demo/demo_script.md",
         ".env.example",
         "final_report.json",

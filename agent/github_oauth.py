@@ -237,7 +237,11 @@ class GitHubConnectionService:
         return record.github_user_id is None and record.encrypted_pending_code is None
 
     def _refresh_env_token_from_settings(self, record: GitHubConnectionRecord) -> GitHubConnectionRecord:
-        if not self._is_env_token_connection(record) or not self._settings.github_pat_configured:
+        if (
+            not self._settings.github_env_token_fallback_enabled
+            or not self._is_env_token_connection(record)
+            or not self._settings.github_pat_configured
+        ):
             return record
         token = self._settings.github_personal_access_token
         if not token:
@@ -255,11 +259,19 @@ class GitHubConnectionService:
         self,
         connection_id: str,
         *,
-        task_id: str,
+        task_id: str | None,
     ) -> GitHubWorkflowAuth:
         record = self._store.get_connection(connection_id)
         if record.status == "exchanged" and record.encrypted_access_token and record.github_login:
             record = self._refresh_env_token_from_settings(record)
+            if task_id and record.task_id != task_id:
+                record = self._store.update(
+                    replace(
+                        record,
+                        task_id=task_id,
+                        updated_at=datetime.now(UTC),
+                    )
+                )
             token = self.decrypt_access_token(record)
             return GitHubWorkflowAuth(
                 connection_id=record.id,
@@ -296,7 +308,7 @@ class GitHubConnectionService:
         scopes = _parse_scopes(str(token_payload.get("scope") or ""))
         exchanged = replace(
             record,
-            task_id=task_id,
+            task_id=task_id or record.task_id,
             encrypted_pending_code=None,
             encrypted_access_token=self._encrypt(token),
             scopes=scopes,
@@ -326,12 +338,15 @@ class GitHubConnectionService:
         return self._decrypt(record.encrypted_access_token)
 
     def redirect_url_for_completed_callback(self, record: GitHubConnectionRecord) -> str:
+        params = {
+            "github_connection_id": record.id,
+            "github_status": "connected" if record.status == "exchanged" else "ready",
+        }
+        if record.github_login:
+            params["github_username"] = record.github_login
         return _append_query(
             record.return_to,
-            {
-                "github_connection_id": record.id,
-                "github_status": "ready",
-            },
+            params,
         )
 
     def redirect_url_for_error(self, return_to: str | None, message: str) -> str:
@@ -346,6 +361,10 @@ class GitHubConnectionService:
 
     def create_env_token_connection(self, return_to: str | None) -> GitHubConnectionRecord:
         """Dev fallback when OAuth app vars are missing but GITHUB_TOKEN is configured."""
+        if not self._settings.github_env_token_fallback_enabled:
+            raise GitHubOAuthError(
+                "Backend-token GitHub fallback is disabled. Connect with GitHub OAuth."
+            )
         if not self._settings.github_pat_configured:
             raise GitHubOAuthError(
                 "Backend GitHub token is not configured. Set GITHUB_TOKEN and GITHUB_OWNER."
@@ -390,7 +409,11 @@ class GitHubConnectionService:
     def oauth_public_config(self) -> dict[str, object]:
         return {
             "oauthConfigured": self._settings.github_oauth_configured,
-            "patConfigured": self._settings.github_pat_configured,
+            "patConfigured": (
+                self._settings.github_pat_configured
+                and self._settings.github_env_token_fallback_enabled
+            ),
+            "envTokenFallbackEnabled": self._settings.github_env_token_fallback_enabled,
             "patTokenType": self._settings.github_pat_token_type,
             "canCreateRepositories": self._settings.github_pat_can_create_repositories,
             "recommendedRepoPreference": (
