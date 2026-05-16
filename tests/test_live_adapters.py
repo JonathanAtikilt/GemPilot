@@ -47,7 +47,7 @@ async def test_live_rag_memory_adapter_retrieve_build_context():
         "agent.live_adapters.get_build_context",
         new_callable=AsyncMock,
     ) as mock_get_build_context:
-        from agent.rag.types import BuildContextItem, BuildContextResponse
+        from agent.rag.types import BuildContextItem, BuildContextResponse, ResolvedTechStack
 
         mock_get_build_context.return_value = BuildContextResponse(
             requiredDeliverables=[
@@ -62,6 +62,13 @@ async def test_live_rag_memory_adapter_retrieve_build_context():
             requiredRepositoryFormat=[],
             requiredDemoFormat=[],
             requiredTechStackPieces=[],
+            resolvedTechStack=ResolvedTechStack(
+                source="default",
+                items=["FastAPI"],
+                requiredItems=[],
+                defaultItems=["FastAPI"],
+                reason="test",
+            ),
             scopeWarnings=[],
             evidence=[],
         )

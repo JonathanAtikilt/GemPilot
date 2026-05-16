@@ -1,6 +1,8 @@
 import pytest
 
 from agent.config import Settings
+from agent.model_client import DeterministicModelClient
+from agent.rag.build_context import get_build_context
 from agent.schemas import RunAgentRequest, TaskStatus
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
@@ -16,6 +18,48 @@ VALID_IDEA = (
     "Build a healthcare referral coordination agent that helps clinics "
     "prevent failed referrals."
 )
+
+
+class CapturingModelClient(DeterministicModelClient):
+    def __init__(self) -> None:
+        super().__init__(mode="mock")
+        self.prompts: dict[str, str] = {}
+
+    async def complete_structured(self, **kwargs):
+        self.prompts[kwargs["purpose"]] = kwargs["prompt"]
+        return await super().complete_structured(**kwargs)
+
+
+class EmptyRagAdapter:
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict | None = None,
+        top_k: int = 8,
+    ) -> dict:
+        response = await get_build_context(
+            project_id,
+            idea,
+            optional_params=optional_params,
+            top_k=top_k,
+        )
+        payload = response.model_dump()
+        payload["mode"] = "live"
+        return payload
+
+    async def retrieve_hackathon_context(self, idea: str) -> list[dict]:
+        return []
+
+    async def retrieve_nvidia_context(self, idea: str) -> list[dict]:
+        return []
+
+    async def find_similar_builds(self, issue: str) -> list[dict]:
+        return []
+
+    async def write_memory(self, memory: dict) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -115,6 +159,39 @@ def test_route_after_tool_result_fails_unrecoverable_result():
     )
 
     assert route == "failed"
+
+
+@pytest.mark.asyncio
+async def test_workflow_plan_repo_prompt_uses_default_stack_when_rag_stack_is_empty(monkeypatch):
+    async def fake_search(query: str, top_k: int = 5, doc_types=None):
+        return []
+
+    monkeypatch.setattr("agent.rag.build_context.search_rag", fake_search)
+
+    settings = Settings(_env_file=None, adapter_mode="mock")
+    model_client = CapturingModelClient()
+    workflow = build_workflow(
+        settings,
+        model_client=model_client,
+        retrieval=EmptyRagAdapter(),
+        tools=InMemoryToolAdapter(),
+    )
+    initial_state = build_initial_state(
+        task_id="task-default-stack",
+        idea=VALID_IDEA,
+        repo_visibility="public",
+        demo_mode=True,
+        settings=settings,
+    )
+
+    final_state = await workflow.ainvoke(initial_state)
+    plan_prompt = model_client.prompts["plan_repo"]
+
+    assert final_state["build_context"]["requiredTechStackPieces"] == []
+    assert final_state["build_context"]["resolvedTechStack"]["source"] == "default"
+    assert "Next.js" in plan_prompt
+    assert "FastAPI" in plan_prompt
+    assert "Supabase Postgres" in plan_prompt
 
 
 @pytest.mark.asyncio

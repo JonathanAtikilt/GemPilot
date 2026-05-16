@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from typing import Any
 
-from agent.rag.chunk import detect_doc_type_from_section_heading
 from agent.rag.retrieve import search_rag
 from agent.rag.types import (
     BuildContextItem,
@@ -16,6 +16,8 @@ from agent.rag.types import (
     EvidenceItem,
     Priority,
     RagSearchResult,
+    ResolvedTechStack,
+    ResolvedTechStackSource,
     ScopeWarningItem,
 )
 
@@ -59,6 +61,101 @@ _CATEGORY_FIELDS: dict[BuildContextResponseCategory, str] = {
     "requiredRepositoryFormat": "requiredRepositoryFormat",
     "requiredDemoFormat": "requiredDemoFormat",
     "requiredTechStackPieces": "requiredTechStackPieces",
+}
+
+DEFAULT_TECH_STACK_ITEMS: tuple[str, ...] = (
+    "Next.js",
+    "React",
+    "TypeScript",
+    "Tailwind CSS",
+    "Python 3.12",
+    "FastAPI",
+    "Uvicorn",
+    "Supabase Postgres",
+    "pgvector",
+    "NVIDIA Nemotron",
+    "pytest",
+    "npm run build",
+)
+
+_DEFAULT_STACK_CATEGORIES: dict[str, str] = {
+    "Next.js": "frontend_framework",
+    "React": "frontend_library",
+    "TypeScript": "frontend_language",
+    "Tailwind CSS": "frontend_style",
+    "Python 3.12": "backend_language",
+    "FastAPI": "backend_framework",
+    "Uvicorn": "backend_server",
+    "Supabase Postgres": "database",
+    "pgvector": "vector_store",
+    "NVIDIA Nemotron": "ai_model",
+    "pytest": "python_tests",
+    "npm run build": "js_build",
+}
+
+_DEFAULT_STACK_ALIASES: dict[str, tuple[str, ...]] = {
+    "Next.js": ("next.js", "nextjs"),
+    "React": ("react",),
+    "TypeScript": ("typescript",),
+    "Tailwind CSS": ("tailwind",),
+    "Python 3.12": ("python", "python 3"),
+    "FastAPI": ("fastapi",),
+    "Uvicorn": ("uvicorn",),
+    "Supabase Postgres": ("supabase", "postgres", "postgresql"),
+    "pgvector": ("pgvector",),
+    "NVIDIA Nemotron": ("nemotron", "nvidia"),
+    "pytest": ("pytest",),
+    "npm run build": ("npm run build", "npm build"),
+}
+
+_STACK_CONFLICT_TERMS: dict[str, tuple[str, ...]] = {
+    "frontend_framework": ("vue", "svelte", "angular", "nuxt", "remix", "vite"),
+    "frontend_library": ("vue", "svelte", "solid", "angular"),
+    "frontend_language": ("javascript", "js only"),
+    "frontend_style": (
+        "bootstrap",
+        "material ui",
+        "mui",
+        "chakra",
+        "styled-components",
+    ),
+    "backend_language": (
+        "node.js",
+        "nodejs",
+        "node ",
+        "go ",
+        "golang",
+        "rust",
+        "java",
+        "kotlin",
+        "ruby",
+        "c#",
+    ),
+    "backend_framework": (
+        "express",
+        "nestjs",
+        "django",
+        "flask",
+        "spring",
+        "rails",
+        "hono",
+        "koa",
+    ),
+    "backend_server": (
+        "express",
+        "nestjs",
+        "django",
+        "flask",
+        "spring",
+        "rails",
+        "hono",
+        "koa",
+    ),
+    "database": ("firebase", "firestore", "mongodb", "mysql", "sqlite", "dynamodb", "redis"),
+    "vector_store": ("pinecone", "weaviate", "qdrant", "milvus", "chromadb", "faiss"),
+    "ai_model": ("openai", "anthropic", "claude", "gemini", "llama", "mistral", "gpt"),
+    "python_tests": ("unittest", "jest", "vitest"),
+    "js_build": ("pnpm build", "yarn build", "vite build", "next build"),
 }
 
 
@@ -122,6 +219,10 @@ async def build_build_context_response(request: BuildContextRequest) -> BuildCon
         requiredRepositoryFormat=response_items["requiredRepositoryFormat"],
         requiredDemoFormat=response_items["requiredDemoFormat"],
         requiredTechStackPieces=response_items["requiredTechStackPieces"],
+        resolvedTechStack=_resolve_tech_stack(
+            required_items=response_items["requiredTechStackPieces"],
+            optional_params=request.optionalParams,
+        ),
         scopeWarnings=scope_warnings,
         evidence=evidence,
     )
@@ -225,6 +326,107 @@ def _build_evidence(chunks: list[RagSearchResult]) -> list[EvidenceItem]:
         )
         for chunk in chunks
     ]
+
+
+def _resolve_tech_stack(
+    *,
+    required_items: list[BuildContextItem],
+    optional_params: BuildContextOptionalParams | None,
+) -> ResolvedTechStack:
+    required_stack_items = _unique_strings(item.item for item in required_items)
+    preferred_stack_items = _unique_strings(optional_params.stack if optional_params else [])
+    explicit_items = [*required_stack_items, *preferred_stack_items]
+
+    default_items = [
+        item
+        for item in DEFAULT_TECH_STACK_ITEMS
+        if _should_add_default_stack_item(item=item, explicit_items=explicit_items)
+    ]
+    items = _unique_strings([*required_stack_items, *preferred_stack_items, *default_items])
+    source = _resolve_stack_source(
+        has_required=bool(required_stack_items),
+        has_preferences=bool(preferred_stack_items),
+        has_defaults=bool(default_items),
+    )
+
+    return ResolvedTechStack(
+        source=source,
+        items=items,
+        requiredItems=required_stack_items,
+        defaultItems=default_items,
+        reason=_resolved_stack_reason(source),
+    )
+
+
+def _should_add_default_stack_item(*, item: str, explicit_items: list[str]) -> bool:
+    category = _DEFAULT_STACK_CATEGORIES[item]
+    return not (
+        _explicitly_covers_default(item=item, explicit_items=explicit_items)
+        or _explicitly_blocks_category(category=category, explicit_items=explicit_items)
+    )
+
+
+def _explicitly_covers_default(*, item: str, explicit_items: list[str]) -> bool:
+    aliases = _DEFAULT_STACK_ALIASES[item]
+    return any(
+        alias in explicit_item.lower()
+        for explicit_item in explicit_items
+        for alias in aliases
+    )
+
+
+def _explicitly_blocks_category(*, category: str, explicit_items: list[str]) -> bool:
+    conflict_terms = _STACK_CONFLICT_TERMS.get(category, ())
+    return any(
+        term in explicit_item.lower()
+        for explicit_item in explicit_items
+        for term in conflict_terms
+    )
+
+
+def _resolve_stack_source(
+    *,
+    has_required: bool,
+    has_preferences: bool,
+    has_defaults: bool,
+) -> ResolvedTechStackSource:
+    if has_defaults and (has_required or has_preferences):
+        return "mixed"
+    if has_required:
+        return "rag_required"
+    if has_preferences:
+        return "request_preference"
+    return "default"
+
+
+def _resolved_stack_reason(source: ResolvedTechStackSource) -> str:
+    reasons = {
+        "rag_required": "RAG required stack items covered the stack, so MVPilot defaults were not needed.",
+        "request_preference": "Request stack preferences covered the stack, so MVPilot defaults were not needed.",
+        "default": "No required or preferred stack was found, so MVPilot defaults were applied.",
+        "mixed": (
+            "Required or preferred stack items were kept, and MVPilot defaults filled "
+            "silent categories without overriding explicit choices."
+        ),
+    }
+    return reasons[source]
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        item = value.strip()
+        if not item:
+            continue
+        key = _normalize_item(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+    return items
 
 
 def _normalize_item(text: str) -> str:
