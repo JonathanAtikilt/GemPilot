@@ -111,6 +111,9 @@ class InMemoryTaskStore:
             )
             updated_detail = TaskDetailResponse(
                 task=updated_task,
+                runtime=state.get("runtime", current.runtime),
+                registered_tools=list(state.get("registered_tools", current.registered_tools)),
+                openclaw_trace=list(state.get("openclaw_trace", current.openclaw_trace)),
                 agent_steps=list(state.get("agent_steps", current.agent_steps)),
                 retrieved_docs=list(state.get("retrieved_docs", current.retrieved_docs)),
                 build_context=state.get("build_context", current.build_context),

@@ -80,6 +80,14 @@ class AgentService:
             tools = LiveToolAdapter()
             audit = LiveAuditAdapter(model_name=self._settings.nemotron_fast_model)
 
+        if self._settings.openclaw_configured:
+            from agent.openclaw_runtime import OpenClawToolAdapter
+
+            tools = OpenClawToolAdapter(
+                tools,
+                environment=self._settings.openclaw_env,
+            )
+
         workflow = build_workflow(
             self._settings,
             tools=tools,
@@ -135,6 +143,9 @@ class AgentService:
             "build_context": detail.build_context or {},
             "memory_matches": detail.memory_matches,
             "tool_calls": detail.tool_calls,
+            "runtime": detail.runtime,
+            "registered_tools": detail.registered_tools,
+            "openclaw_trace": detail.openclaw_trace,
             "generated_artifacts": detail.generated_artifacts,
             "graph_trace": [*detail.graph_trace, step],
             "final_report": {

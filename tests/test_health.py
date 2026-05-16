@@ -3,8 +3,18 @@ from agent.main import create_app
 from fastapi.testclient import TestClient
 
 
-def test_health_returns_mock_defaults_without_secret_values(client):
-    response = client.get("/health")
+def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
+    for key in (
+        "NVIDIA_API_KEY",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "OPENCLAW_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    app = create_app(settings=Settings(_env_file=None, adapter_mode="mock"))
+
+    with TestClient(app) as client:
+        response = client.get("/health")
 
     assert response.status_code == 200
     data = response.json()
@@ -17,6 +27,8 @@ def test_health_returns_mock_defaults_without_secret_values(client):
         "nvidia_configured": False,
         "openclaw_configured": False,
         "openclaw_env": None,
+        "openclaw_runtime_ready": False,
+        "openclaw_registered_tools": [],
         "supabase_configured": False,
         "rag_configured": False,
         "rag_missing_env": [
@@ -31,7 +43,8 @@ def test_health_returns_mock_defaults_without_secret_values(client):
     assert "fake-openclaw" not in response.text
 
 
-def test_health_is_degraded_when_live_mode_lacks_nvidia_config():
+def test_health_is_degraded_when_live_mode_lacks_nvidia_config(monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     app = create_app(settings=Settings(_env_file=None, adapter_mode="live"))
 
     with TestClient(app) as client:
@@ -94,3 +107,5 @@ def test_health_reports_rag_configured_when_supabase_and_nvidia_set(monkeypatch)
     assert data["rag_live_ready"] is True
     assert data["supabase_configured"] is True
     assert data["openclaw_env"] == "development"
+    assert data["openclaw_runtime_ready"] is True
+    assert "github.create_repo" in data["openclaw_registered_tools"]

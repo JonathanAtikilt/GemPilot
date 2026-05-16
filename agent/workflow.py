@@ -40,6 +40,10 @@ from agent.frontend_intake import (
 )
 from agent.github_oauth import GitHubConnectionService, GitHubOAuthError
 from agent.live_adapters import LiveRagMemoryAdapter
+from agent.openclaw_runtime import (
+    registered_tools_for_settings,
+    runtime_name_for_settings,
+)
 from agent.schemas import UploadedSourceFileContent
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
@@ -52,6 +56,9 @@ class WorkflowState(TypedDict):
     repo_visibility: Literal["public", "private"]
     demo_mode: bool
     source_urls: NotRequired[list[str]]
+    runtime: str
+    registered_tools: NotRequired[list[str]]
+    openclaw_trace: ListReducer
     status: str
     nemotron_model: str
     mock_mode: bool
@@ -98,6 +105,9 @@ def build_initial_state(
         "repo_visibility": repo_visibility,
         "demo_mode": demo_mode,
         "source_urls": list(source_urls or []),
+        "runtime": runtime_name_for_settings(settings),
+        "registered_tools": registered_tools_for_settings(settings),
+        "openclaw_trace": [],
         "status": "started",
         "nemotron_model": settings.nemotron_model,
         "mock_mode": settings.mock_mode,
@@ -426,6 +436,7 @@ def build_workflow(
             ),
             "repo": tool_call["repo"],
             "tool_calls": [tool_call],
+            "openclaw_trace": _openclaw_trace_from_tool_call(tool_call),
             "last_tool_result": tool_call,
         }
         if tool_call["status"] != "success":
@@ -490,6 +501,7 @@ def build_workflow(
                 ],
             ),
             "tool_calls": [tool_call],
+            "openclaw_trace": _openclaw_trace_from_tool_call(tool_call),
             "last_tool_result": tool_call,
         }
         if tool_call["status"] != "success":
@@ -515,6 +527,7 @@ def build_workflow(
                 ],
             ),
             "tool_calls": [tool_call],
+            "openclaw_trace": _openclaw_trace_from_tool_call(tool_call),
             "last_tool_result": tool_call,
         }
 
@@ -541,6 +554,7 @@ def build_workflow(
             "blocker_recovered": True,
             "blocker_analysis": blocker_analysis,
             "tool_calls": [tool_call],
+            "openclaw_trace": _openclaw_trace_from_tool_call(tool_call),
             "last_tool_result": tool_call,
         }
 
@@ -794,6 +808,11 @@ def _source_warnings(build_context: dict[str, Any]) -> list[dict[str, str]]:
     source_context = build_context.get("sourceContext", {})
     warnings = source_context.get("warnings") if isinstance(source_context, dict) else []
     return [warning for warning in warnings if isinstance(warning, dict)]
+
+
+def _openclaw_trace_from_tool_call(tool_call: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = tool_call.get("openclaw_trace", [])
+    return [entry for entry in trace if isinstance(entry, dict)]
 
 
 def route_after_tool_result(state: dict[str, Any]) -> str:
