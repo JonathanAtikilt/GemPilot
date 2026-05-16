@@ -170,7 +170,7 @@ def build_workflow(
                 message="Retrieved hackathon guidance and prior memory matches.",
                 decision_trace=[
                     "Seeded context from deterministic RAG snippets.",
-                    "Selected healthcare demo memories tied to blocker recovery.",
+                    "Selected demo memories tied to blocker recovery.",
                 ],
             ),
             "retrieved_docs": docs,
@@ -194,7 +194,7 @@ def build_workflow(
         return {
             **append_model_step(
                 node_name="scope_mvp",
-                message="Scoped the MVP to a judge-friendly referral workflow.",
+                message="Scoped the MVP to one judge-friendly workflow.",
                 result=result,
             ),
             "mvp_scope": scope,

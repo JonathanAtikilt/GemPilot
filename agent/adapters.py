@@ -28,10 +28,10 @@ class InMemoryRagMemoryAdapter:
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
         return [{
             "source": "hackathon_brief",
-            "title": "MVPilot healthcare demo lane",
+            "title": "MVPilot demo lane",
             "snippet": (
-                "Mock mode: prioritize a visible referral workflow, judge-ready "
-                "README, and short pitch package."
+                "Mock mode: prioritize one visible workflow, a judge-ready README, "
+                "and a short pitch package."
             ),
             "query": idea,
             "score": 0.94,
@@ -52,8 +52,8 @@ class InMemoryRagMemoryAdapter:
         return [{
             "source": "previous_demo",
             "summary": (
-                "Mock mode: healthcare referral demos land better when blockers "
-                "show recovery instead of a perfect run."
+                "Mock mode: demos land better when blockers show recovery "
+                "instead of a perfect run."
             ),
             "score": 0.88,
         },
