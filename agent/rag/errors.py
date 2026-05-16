@@ -1,0 +1,2 @@
+class RagConfigurationError(Exception):
+    pass

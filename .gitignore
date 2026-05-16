@@ -2,11 +2,17 @@
 .env.*
 !.env.example
 
+node_modules/
+.venv/
+dist/
+build/
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .coverage
 htmlcov/
+*.egg-info/
 
 .idea/
 .playwright-mcp/
