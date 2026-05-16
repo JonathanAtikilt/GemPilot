@@ -103,7 +103,6 @@ class ApiChunk(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     chunks: list[ApiChunk]
-    warning: str | None = None
 
 
 class AnswerContextRequest(BaseModel):
@@ -117,7 +116,6 @@ class AnswerContextResponse(BaseModel):
     query: str
     context: list[ApiChunk]
     recommended_context_summary: str
-    warning: str | None = None
 
 
 class SourcesResponse(BaseModel):

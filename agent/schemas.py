@@ -70,6 +70,7 @@ class TaskDetailResponse(BaseModel):
     task: TaskRecord
     agent_steps: list[AgentStep] = Field(default_factory=list)
     retrieved_docs: list[dict[str, Any]] = Field(default_factory=list)
+    build_context: dict[str, Any] | None = None
     memory_matches: list[dict[str, Any]] = Field(default_factory=list)
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     approvals: list[ApprovalRecord] = Field(default_factory=list)

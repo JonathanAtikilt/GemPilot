@@ -64,7 +64,15 @@ curl -X POST http://localhost:3001/rag/search \
 
 Search embeds the query in query mode, retrieves similar chunks, and reranks candidates with `llama-nemotron-rerank-1b-v2` when available.
 
-## Orchestrator helper
+## Orchestrator integration
+
+The Nemotron workflow always uses live RAG via `LiveRagMemoryAdapter` in the `retrieve_context` node. Results are stored on task state as `build_context` and passed into Nemotron prompts for `scope_mvp` and `plan_repo`.
+
+- Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `NVIDIA_API_KEY`
+- Run `POST /rag/ingest` before agent tasks so indexed chunks exist
+- No mock defaults or degraded paths: missing config or failed embed/rerank/search raises an error; empty categories mean retrieval found no matching evidence
+
+Direct helper (also used by `POST /rag/get-build-context`):
 
 ```python
 from agent.rag import get_build_context

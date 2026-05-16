@@ -79,6 +79,7 @@ class InMemoryTaskStore:
                 task=updated_task,
                 agent_steps=list(state.get("agent_steps", current.agent_steps)),
                 retrieved_docs=list(state.get("retrieved_docs", current.retrieved_docs)),
+                build_context=state.get("build_context", current.build_context),
                 memory_matches=list(state.get("memory_matches", current.memory_matches)),
                 tool_calls=list(state.get("tool_calls", current.tool_calls)),
                 approvals=current.approvals,

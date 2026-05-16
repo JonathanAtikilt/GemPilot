@@ -109,3 +109,94 @@ def log_tool_call(
             {"logged": False, "row": row},
             verification_status="failed",
         ).model_dump(mode="json")
+
+
+def log_audit_event(
+    task_id: str | None,
+    step: str,
+    message: str,
+    data: dict[str, Any] | None = None,
+) -> dict:
+    """Write an audit log row when Supabase is configured."""
+
+    safe_data = redact_secrets(deepcopy(data or {}))
+    row = {
+        "task_id": task_id,
+        "step": step,
+        "message": message,
+        "data": safe_data,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+    url, key = _supabase_config()
+    if not url or not key:
+        return ToolResult.success(
+            "supabase.log_audit_event",
+            {
+                "logged": False,
+                "reason": "Supabase logging is not configured.",
+                "row": row,
+            },
+            verification_status="not_checked",
+        ).model_dump(mode="json")
+
+    try:
+        _post_supabase("audit_logs", row)
+        return ToolResult.success(
+            "supabase.log_audit_event",
+            {"logged": True, "table": "audit_logs"},
+            verification_status="verified",
+        ).model_dump(mode="json")
+    except Exception as exc:
+        return ToolResult.failure(
+            "supabase.log_audit_event",
+            str(exc),
+            {"logged": False, "row": row},
+            verification_status="failed",
+        ).model_dump(mode="json")
+
+
+def log_generated_artifact(
+    task_id: str | None,
+    artifact_type: str,
+    path: str,
+    content: str,
+    commit_sha: str | None = None,
+) -> dict:
+    """Write a generated artifact row when Supabase is configured."""
+
+    row = {
+        "task_id": task_id,
+        "artifact_type": artifact_type,
+        "path": path,
+        "content": content,
+        "commit_sha": commit_sha,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+    url, key = _supabase_config()
+    if not url or not key:
+        return ToolResult.success(
+            "supabase.log_generated_artifact",
+            {
+                "logged": False,
+                "reason": "Supabase logging is not configured.",
+                "row": row,
+            },
+            verification_status="not_checked",
+        ).model_dump(mode="json")
+
+    try:
+        _post_supabase("generated_artifacts", row)
+        return ToolResult.success(
+            "supabase.log_generated_artifact",
+            {"logged": True, "table": "generated_artifacts"},
+            verification_status="verified",
+        ).model_dump(mode="json")
+    except Exception as exc:
+        return ToolResult.failure(
+            "supabase.log_generated_artifact",
+            str(exc),
+            {"logged": False, "row": row},
+            verification_status="failed",
+        ).model_dump(mode="json")

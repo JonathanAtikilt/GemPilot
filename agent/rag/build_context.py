@@ -53,53 +53,6 @@ DOC_TYPE_TO_CATEGORY: dict[DocType, BuildContextResponseCategory] = {
     "unknown": "scopeWarnings",
 }
 
-WEAK_RETRIEVAL_SCORE_THRESHOLD = 0.15
-
-_FALLBACK_ITEMS: dict[BuildContextResponseCategory, list[str]] = {
-    "requiredDeliverables": [
-        "Working MVP",
-        "GitHub repository",
-        "README.md",
-        "Setup instructions",
-        "Agent activity/build log",
-        "Clear NVIDIA/Nemotron usage explanation",
-    ],
-    "allowedToolsAndAPIs": [
-        "NVIDIA API",
-        "GitHub API",
-        "Supabase",
-        "FastAPI",
-        "React or Next.js",
-        "Supabase pgvector",
-    ],
-    "requiredRepositoryFormat": [
-        "README.md",
-        ".env.example",
-        "docs/BUILD_LOG.md",
-        "docs/ARCHITECTURE.md",
-        "frontend/backend or apps/web/apps/api structure",
-        "rag/sources",
-        "logs",
-    ],
-    "requiredDemoFormat": [
-        "Show user entering project idea",
-        "Show RAG retrieving build context",
-        "Show Orchestrator generating plan",
-        "Show GitHub Agent committing files",
-        "Show frontend displaying logs and final repo link",
-    ],
-    "requiredTechStackPieces": [
-        "React or Next.js frontend",
-        "FastAPI backend",
-        "Supabase Postgres",
-        "Supabase pgvector",
-        "NVIDIA embedding model",
-        "NVIDIA reranker model",
-        "Nemotron reasoning model",
-        "GitHub API integration",
-    ],
-}
-
 _CATEGORY_FIELDS: dict[BuildContextResponseCategory, str] = {
     "requiredDeliverables": "requiredDeliverables",
     "allowedToolsAndAPIs": "allowedToolsAndAPIs",
@@ -133,45 +86,34 @@ async def get_build_context(
 
 async def build_build_context_response(request: BuildContextRequest) -> BuildContextResponse:
     query = _build_search_query(request)
-    chunks, warning = await search_rag(query, request.topK, BUILD_CONTEXT_DOC_TYPES)
+    chunks = await search_rag(query, request.topK, BUILD_CONTEXT_DOC_TYPES)
     reranked_count = len(chunks)
 
     categorized = _categorize_chunks(chunks)
     evidence = _build_evidence(chunks)
-    used_fallback_categories: list[str] = []
-    weak_retrieval = not chunks or max((chunk.score for chunk in chunks), default=0) < WEAK_RETRIEVAL_SCORE_THRESHOLD
+    empty_categories: list[str] = []
 
     response_items: dict[BuildContextResponseCategory, list[BuildContextItem]] = {
-        category: [] for category in _CATEGORY_FIELDS
+        category: categorized.get(category, []) for category in _CATEGORY_FIELDS
     }
-    scope_warnings: list[ScopeWarningItem] = []
 
     for category in _CATEGORY_FIELDS:
-        extracted = categorized.get(category, [])
-        if extracted:
-            response_items[category] = extracted
-        else:
-            response_items[category] = _fallback_items(category)
-            used_fallback_categories.append(category)
+        if not response_items[category]:
+            empty_categories.append(category)
 
-    for item in categorized.get("scopeWarnings", []):
-        scope_warnings.append(
-            ScopeWarningItem(item=item.item, reason=item.reason, source=item.source)
-        )
-
-    if not scope_warnings:
-        scope_warnings = _default_scope_warnings() if weak_retrieval or not chunks else scope_warnings
+    scope_warnings: list[ScopeWarningItem] = [
+        ScopeWarningItem(item=item.item, reason=item.reason, source=item.source)
+        for item in categorized.get("scopeWarnings", [])
+    ]
 
     logger.info(
-        "rag.get_build_context projectId=%s query=%r docTypes=%s chunks=%s reranked=%s "
-        "fallbackCategories=%s warning=%s",
+        "rag.get_build_context projectId=%s query=%r docTypes=%s chunks=%s reranked=%s emptyCategories=%s",
         request.projectId,
         query,
         BUILD_CONTEXT_DOC_TYPES,
         len(chunks),
         reranked_count,
-        used_fallback_categories,
-        warning,
+        empty_categories,
     )
 
     return BuildContextResponse(
@@ -282,33 +224,6 @@ def _build_evidence(chunks: list[RagSearchResult]) -> list[EvidenceItem]:
             score=chunk.score,
         )
         for chunk in chunks
-    ]
-
-
-def _fallback_items(category: BuildContextResponseCategory) -> list[BuildContextItem]:
-    return [
-        BuildContextItem(
-            item=text,
-            priority="high" if category == "requiredDeliverables" else "medium",
-            reason="MVPilot default when retrieval is sparse or no matching chunks were found.",
-            source="mvpilot://defaults",
-        )
-        for text in _FALLBACK_ITEMS[category]
-    ]
-
-
-def _default_scope_warnings() -> list[ScopeWarningItem]:
-    return [
-        ScopeWarningItem(
-            item="Do not expose SUPABASE_SERVICE_ROLE_KEY to the frontend",
-            reason="MVPilot default scope warning.",
-            source="mvpilot://defaults",
-        ),
-        ScopeWarningItem(
-            item="Do not treat raw logs as higher authority than hackathon rules or official model docs",
-            reason="MVPilot default scope warning.",
-            source="mvpilot://defaults",
-        ),
     ]
 
 

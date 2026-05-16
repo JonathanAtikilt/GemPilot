@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from agent.adapters import RagMemoryAdapter, ToolAdapter, AuditAdapter
 from agent.schemas import AgentStep
 
+from agent.rag.build_context import get_build_context
 from agent.rag.retrieve import search_rag
+from agent.rag.types import BuildContextOptionalParams
 from tools.github_tool import create_repo, commit_files
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
@@ -13,16 +15,38 @@ from tools.verifier import verify_commit
 
 class LiveRagMemoryAdapter:
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
-        results, _ = await search_rag(query=idea, top_k=5, doc_types=["hackathon_rules"])
+        results = await search_rag(query=idea, top_k=5, doc_types=["hackathon_rules"])
         return [r.model_dump() for r in results]
 
     async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]:
-        results, _ = await search_rag(query=idea, top_k=5, doc_types=["nvidia_docs"])
+        results = await search_rag(query=idea, top_k=5, doc_types=["nvidia_docs"])
         return [r.model_dump() for r in results]
 
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
-        results, _ = await search_rag(query=issue, top_k=5, doc_types=["build_log"])
+        results = await search_rag(query=issue, top_k=5, doc_types=["build_log"])
         return [r.model_dump() for r in results]
+
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]:
+        parsed_params: BuildContextOptionalParams | None = None
+        if optional_params:
+            parsed_params = BuildContextOptionalParams.model_validate(optional_params)
+
+        response = await get_build_context(
+            project_id,
+            idea,
+            optional_params=parsed_params,
+            top_k=top_k,
+        )
+        payload = response.model_dump()
+        payload["mode"] = "live"
+        return payload
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
         pass

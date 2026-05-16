@@ -7,6 +7,14 @@ class RagMemoryAdapter(Protocol):
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]: ...
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]: ...
     async def write_memory(self, memory: dict[str, Any]) -> None: ...
 
 class ToolAdapter(Protocol):
@@ -25,49 +33,39 @@ class AuditAdapter(Protocol):
 
 
 class InMemoryRagMemoryAdapter:
+    """Delegates all retrieval to live Supabase + NVIDIA RAG (no mock snippets)."""
+
+    def __init__(self) -> None:
+        from agent.live_adapters import LiveRagMemoryAdapter
+
+        self._live = LiveRagMemoryAdapter()
+
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
-        return [{
-            "source": "hackathon_brief",
-            "title": "MVPilot demo lane",
-            "snippet": (
-                "Mock mode: prioritize one visible workflow, a judge-ready README, "
-                "and a short pitch package."
-            ),
-            "query": idea,
-            "score": 0.94,
-        }]
+        return await self._live.retrieve_hackathon_context(idea)
 
     async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]:
-        return [{
-            "source": "nvidia_reference",
-            "title": "Nemotron reasoning pattern",
-            "snippet": (
-                "Mock mode: every agent step should expose model name and a "
-                "compact decision trace."
-            ),
-            "score": 0.91,
-        }]
+        return await self._live.retrieve_nvidia_context(idea)
+
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]:
+        return await self._live.retrieve_build_context(
+            project_id,
+            idea,
+            optional_params=optional_params,
+            top_k=top_k,
+        )
 
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
-        return [{
-            "source": "previous_demo",
-            "summary": (
-                "Mock mode: demos land better when blockers show recovery "
-                "instead of a perfect run."
-            ),
-            "score": 0.88,
-        },
-        {
-            "source": "team_split",
-            "summary": (
-                "Mock mode: Person 1 owns orchestration and produces artifacts "
-                "for downstream UI/demo surfaces."
-            ),
-            "score": 0.84,
-        }]
+        return await self._live.find_similar_builds(issue)
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
-        pass
+        await self._live.write_memory(memory)
 
 
 class InMemoryToolAdapter:

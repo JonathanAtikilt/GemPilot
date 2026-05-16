@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from agent.live_adapters import LiveRagMemoryAdapter, LiveToolAdapter, LiveAuditAdapter
+from agent.rag.errors import RagConfigurationError
 
 
 @pytest.mark.asyncio
@@ -10,7 +11,7 @@ async def test_live_rag_memory_adapter():
     with patch("agent.live_adapters.search_rag", new_callable=AsyncMock) as mock_search:
         mock_result = MagicMock()
         mock_result.model_dump.return_value = {"id": "mock_chunk"}
-        mock_search.return_value = ([mock_result], None)
+        mock_search.return_value = [mock_result]
         
         docs = await adapter.retrieve_hackathon_context("test")
         assert docs == [{"id": "mock_chunk"}]
@@ -25,6 +26,50 @@ async def test_live_rag_memory_adapter():
         mock_search.assert_awaited_with(query="issue", top_k=5, doc_types=["build_log"])
         
         await adapter.write_memory({})
+
+
+@pytest.mark.asyncio
+async def test_live_rag_memory_adapter_retrieve_build_context():
+    adapter = LiveRagMemoryAdapter()
+    with patch(
+        "agent.live_adapters.get_build_context",
+        new_callable=AsyncMock,
+    ) as mock_get_build_context:
+        from agent.rag.types import BuildContextItem, BuildContextResponse
+
+        mock_get_build_context.return_value = BuildContextResponse(
+            requiredDeliverables=[
+                BuildContextItem(
+                    item="Working MVP",
+                    priority="critical",
+                    reason="test",
+                    source="rag/sources/mvpilot_build_requirements.md",
+                )
+            ],
+            allowedToolsAndAPIs=[],
+            requiredRepositoryFormat=[],
+            requiredDemoFormat=[],
+            requiredTechStackPieces=[],
+            scopeWarnings=[],
+            evidence=[],
+        )
+
+        payload = await adapter.retrieve_build_context("task-1", "hackathon agent idea")
+        assert payload["mode"] == "live"
+        assert payload["requiredDeliverables"][0]["item"] == "Working MVP"
+        mock_get_build_context.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_live_rag_memory_adapter_build_context_raises_without_rag_config():
+    adapter = LiveRagMemoryAdapter()
+    with patch(
+        "agent.live_adapters.get_build_context",
+        new_callable=AsyncMock,
+        side_effect=RagConfigurationError("missing config"),
+    ):
+        with pytest.raises(RagConfigurationError, match="missing config"):
+            await adapter.retrieve_build_context("task-1", "hackathon agent idea")
 
 
 def test_live_tool_adapter():
