@@ -53,6 +53,13 @@ async def test_full_workflow_completes_with_expected_timeline():
         "report_result",
     ]
     assert detail.retrieved_docs
+    assert detail.build_context
+    assert detail.build_context.get("requiredDeliverables")
+    assert detail.build_context.get("allowedToolsAndAPIs")
+    assert detail.build_context.get("requiredRepositoryFormat")
+    assert detail.build_context.get("requiredDemoFormat")
+    assert detail.build_context.get("requiredTechStackPieces")
+    assert detail.build_context.get("mode") == "mock"
     assert detail.memory_matches
     assert detail.final_report is not None
     assert detail.final_report["mode"] == "mock"

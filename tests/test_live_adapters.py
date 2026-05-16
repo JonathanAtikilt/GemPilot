@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from agent.live_adapters import LiveRagMemoryAdapter, LiveToolAdapter, LiveAuditAdapter
+from agent.rag.errors import RagConfigurationError
 
 
 @pytest.mark.asyncio
@@ -25,6 +26,51 @@ async def test_live_rag_memory_adapter():
         mock_search.assert_awaited_with(query="issue", top_k=5, doc_types=["build_log"])
         
         await adapter.write_memory({})
+
+
+@pytest.mark.asyncio
+async def test_live_rag_memory_adapter_retrieve_build_context():
+    adapter = LiveRagMemoryAdapter()
+    with patch(
+        "agent.live_adapters.get_build_context",
+        new_callable=AsyncMock,
+    ) as mock_get_build_context:
+        from agent.rag.types import BuildContextItem, BuildContextResponse
+
+        mock_get_build_context.return_value = BuildContextResponse(
+            requiredDeliverables=[
+                BuildContextItem(
+                    item="Working MVP",
+                    priority="critical",
+                    reason="test",
+                    source="rag/sources/mvpilot_build_requirements.md",
+                )
+            ],
+            allowedToolsAndAPIs=[],
+            requiredRepositoryFormat=[],
+            requiredDemoFormat=[],
+            requiredTechStackPieces=[],
+            scopeWarnings=[],
+            evidence=[],
+        )
+
+        payload = await adapter.retrieve_build_context("task-1", "hackathon agent idea")
+        assert payload["mode"] == "live"
+        assert payload["requiredDeliverables"][0]["item"] == "Working MVP"
+        mock_get_build_context.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_live_rag_memory_adapter_build_context_falls_back_without_rag_config():
+    adapter = LiveRagMemoryAdapter()
+    with patch(
+        "agent.live_adapters.get_build_context",
+        new_callable=AsyncMock,
+        side_effect=RagConfigurationError("missing config"),
+    ):
+        payload = await adapter.retrieve_build_context("task-1", "hackathon agent idea")
+        assert payload["mode"] == "fallback"
+        assert payload["requiredDeliverables"]
 
 
 def test_live_tool_adapter():

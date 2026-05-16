@@ -64,7 +64,14 @@ curl -X POST http://localhost:3001/rag/search \
 
 Search embeds the query in query mode, retrieves similar chunks, and reranks candidates with `llama-nemotron-rerank-1b-v2` when available.
 
-## Orchestrator helper
+## Orchestrator integration
+
+The Nemotron workflow calls `RagMemoryAdapter.retrieve_build_context()` in the `retrieve_context` node. Results are stored on task state as `build_context` and passed into Nemotron prompts for `scope_mvp` and `plan_repo`.
+
+- `ADAPTER_MODE=mock` → deterministic MVPilot defaults (`mode: mock`)
+- `ADAPTER_MODE=live` → `get_build_context()` via Supabase + NVIDIA (`mode: live`, or `fallback` if RAG is not configured)
+
+Direct helper (also used by `POST /rag/get-build-context`):
 
 ```python
 from agent.rag import get_build_context

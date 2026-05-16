@@ -318,3 +318,19 @@ def _normalize_item(text: str) -> str:
 
 def _priority_rank(priority: Priority) -> int:
     return {"critical": 4, "high": 3, "medium": 2, "low": 1}[priority]
+
+
+def default_build_context_response(
+    request: BuildContextRequest | None = None,
+) -> BuildContextResponse:
+    """Deterministic MVPilot defaults for mock mode or when RAG is not configured."""
+    _ = request
+    return BuildContextResponse(
+        requiredDeliverables=_fallback_items("requiredDeliverables"),
+        allowedToolsAndAPIs=_fallback_items("allowedToolsAndAPIs"),
+        requiredRepositoryFormat=_fallback_items("requiredRepositoryFormat"),
+        requiredDemoFormat=_fallback_items("requiredDemoFormat"),
+        requiredTechStackPieces=_fallback_items("requiredTechStackPieces"),
+        scopeWarnings=_default_scope_warnings(),
+        evidence=[],
+    )

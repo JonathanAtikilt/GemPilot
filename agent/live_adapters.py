@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from agent.adapters import RagMemoryAdapter, ToolAdapter, AuditAdapter
 from agent.schemas import AgentStep
 
+from agent.rag.build_context import default_build_context_response, get_build_context
+from agent.rag.errors import RagConfigurationError
 from agent.rag.retrieve import search_rag
+from agent.rag.types import BuildContextOptionalParams, BuildContextRequest
 from tools.github_tool import create_repo, commit_files
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
@@ -23,6 +26,36 @@ class LiveRagMemoryAdapter:
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
         results, _ = await search_rag(query=issue, top_k=5, doc_types=["build_log"])
         return [r.model_dump() for r in results]
+
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]:
+        parsed_params: BuildContextOptionalParams | None = None
+        if optional_params:
+            parsed_params = BuildContextOptionalParams.model_validate(optional_params)
+
+        try:
+            response = await get_build_context(
+                project_id,
+                idea,
+                optional_params=parsed_params,
+                top_k=top_k,
+            )
+            payload = response.model_dump()
+            payload["mode"] = "live"
+            return payload
+        except RagConfigurationError:
+            fallback = default_build_context_response(
+                BuildContextRequest(projectId=project_id, idea=idea, topK=top_k)
+            )
+            payload = fallback.model_dump()
+            payload["mode"] = "fallback"
+            return payload
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
         pass

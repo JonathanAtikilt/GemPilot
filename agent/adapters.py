@@ -7,6 +7,14 @@ class RagMemoryAdapter(Protocol):
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]: ...
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]: ...
     async def write_memory(self, memory: dict[str, Any]) -> None: ...
 
 class ToolAdapter(Protocol):
@@ -47,6 +55,24 @@ class InMemoryRagMemoryAdapter:
             ),
             "score": 0.91,
         }]
+
+    async def retrieve_build_context(
+        self,
+        project_id: str,
+        idea: str,
+        *,
+        optional_params: dict[str, Any] | None = None,
+        top_k: int = 8,
+    ) -> dict[str, Any]:
+        from agent.rag.build_context import default_build_context_response
+        from agent.rag.types import BuildContextRequest
+
+        response = default_build_context_response(
+            BuildContextRequest(projectId=project_id, idea=idea, topK=top_k)
+        )
+        payload = response.model_dump()
+        payload["mode"] = "mock"
+        return payload
 
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
         return [{

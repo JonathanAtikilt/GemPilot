@@ -101,6 +101,7 @@ class AgentService:
             "status": TaskStatus.FAILED,
             "agent_steps": [*detail.agent_steps, step],
             "retrieved_docs": detail.retrieved_docs,
+            "build_context": detail.build_context or {},
             "memory_matches": detail.memory_matches,
             "tool_calls": detail.tool_calls,
             "generated_artifacts": detail.generated_artifacts,

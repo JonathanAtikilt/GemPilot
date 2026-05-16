@@ -80,6 +80,7 @@ def test_task_detail_returns_populated_workflow_dashboard(client):
         "task",
         "agent_steps",
         "retrieved_docs",
+        "build_context",
         "memory_matches",
         "tool_calls",
         "approvals",
@@ -87,6 +88,7 @@ def test_task_detail_returns_populated_workflow_dashboard(client):
         "graph_trace",
         "final_report",
     }
+    assert data["build_context"]["requiredDeliverables"]
     assert data["task"]["id"] == task_id
     assert data["task"]["idea"] == VALID_IDEA
     assert data["task"]["repo_visibility"] == "public"
