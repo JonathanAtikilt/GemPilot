@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 from datetime import UTC, datetime
 
@@ -14,6 +15,37 @@ from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
 from tools.verifier import verify_commit
 from tools.tool_logger import log_audit_event, log_generated_artifact, log_tool_call
+
+logger = logging.getLogger(__name__)
+
+
+def _memory_row_from_payload(memory: dict[str, Any]) -> dict[str, Any]:
+    """Shape workflow memory for Supabase without FK-breaking task ids."""
+
+    outcome = dict(memory.get("outcome") or {})
+    workflow_task_id = memory.get("task_id")
+    if workflow_task_id:
+        outcome["workflow_task_id"] = workflow_task_id
+
+    artifacts = outcome.get("generated_artifacts")
+    if isinstance(artifacts, list):
+        outcome["generated_artifacts"] = [
+            {
+                "name": artifact.get("name"),
+                "kind": artifact.get("kind"),
+                "summary": artifact.get("summary"),
+            }
+            if isinstance(artifact, dict)
+            else {"name": str(artifact)}
+            for artifact in artifacts
+        ]
+
+    return {
+        "idea": str(memory.get("idea") or ""),
+        "summary": str(memory.get("summary") or ""),
+        "outcome": outcome,
+        "tags": list(memory.get("tags") or []),
+    }
 
 
 class LiveRagMemoryAdapter:
@@ -74,14 +106,24 @@ class LiveRagMemoryAdapter:
         return payload
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
-        from agent.rag.store import get_rag_store
         from agent.rag.embed import embed_text
-        store = get_rag_store()
-        summary = memory.get("summary", "")
+        from agent.rag.env_status import is_rag_configured
+        from agent.rag.store import get_rag_store
+
+        if not is_rag_configured():
+            logger.info("Skipping memory write: RAG storage is not configured.")
+            return
+
+        row = _memory_row_from_payload(memory)
+        summary = row.get("summary", "")
         if summary:
-            embedding = await embed_text(summary, input_type="document")
-            memory["embedding"] = embedding
-        await store.write_memory(memory)
+            try:
+                row["embedding"] = await embed_text(summary, input_type="document")
+            except Exception as exc:
+                logger.warning("Memory embedding skipped: %s", exc)
+
+        store = get_rag_store()
+        await store.write_memory(row)
 
 
 class LiveToolAdapter:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -182,10 +183,53 @@ async def test_exchange_env_token_connection_does_not_require_oauth_app():
         github_token_encryption_key=key,
     )
     service = GitHubConnectionService(settings=settings, store=InMemoryGitHubConnectionStore())
-    record = service.create_env_token_connection("http://localhost:3000")
+    with patch(
+        "agent.github_oauth.check_github_auth",
+        return_value={
+            "status": "success",
+            "output": {"login": "octocat", "authenticated": True},
+        },
+    ):
+        record = service.create_env_token_connection("http://localhost:3000")
 
     auth = await service.exchange_for_workflow(record.id, task_id="task-env")
 
     assert auth.login == "octocat"
     assert auth.config.token == "ghp-env-token"
     assert auth.config.owner == "octocat"
+
+
+@pytest.mark.asyncio
+async def test_exchange_env_token_connection_refreshes_token_from_settings():
+    key = Fernet.generate_key().decode("utf-8")
+    settings = Settings(
+        _env_file=None,
+        adapter_mode="live",
+        github_personal_access_token="ghp-old-token",
+        github_owner="octocat",
+        github_token_encryption_key=key,
+    )
+    store = InMemoryGitHubConnectionStore()
+    service = GitHubConnectionService(settings=settings, store=store)
+    with patch(
+        "agent.github_oauth.check_github_auth",
+        return_value={
+            "status": "success",
+            "output": {"login": "octocat", "authenticated": True},
+        },
+    ):
+        record = service.create_env_token_connection("http://localhost:3000")
+
+    service = GitHubConnectionService(
+        settings=Settings(
+            _env_file=None,
+            adapter_mode="live",
+            github_personal_access_token="ghp-new-token",
+            github_owner="octocat",
+            github_token_encryption_key=key,
+        ),
+        store=store,
+    )
+    auth = await service.exchange_for_workflow(record.id, task_id="task-env")
+
+    assert auth.config.token == "ghp-new-token"

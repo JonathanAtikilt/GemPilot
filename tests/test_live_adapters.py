@@ -35,10 +35,19 @@ async def test_live_rag_memory_adapter():
         assert docs == [{"id": "mock_chunk"}]
         mock_store.search_memories.assert_awaited_with([0.1, 0.2], top_k=5)
         
-        memory_payload = {"summary": "test summary"}
-        await adapter.write_memory(memory_payload)
+        memory_payload = {"task_id": "in-memory-task", "idea": "test idea", "summary": "test summary"}
+        with patch("agent.rag.env_status.is_rag_configured", return_value=True):
+            await adapter.write_memory(memory_payload)
         mock_embed.assert_awaited_with("test summary", input_type="document")
-        mock_store.write_memory.assert_awaited_with({"summary": "test summary", "embedding": [0.1, 0.2]})
+        mock_store.write_memory.assert_awaited_with(
+            {
+                "idea": "test idea",
+                "summary": "test summary",
+                "outcome": {"workflow_task_id": "in-memory-task"},
+                "tags": [],
+                "embedding": [0.1, 0.2],
+            }
+        )
 
 
 @pytest.mark.asyncio

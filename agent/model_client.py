@@ -491,6 +491,7 @@ def _repo_plan_payload(
     warning_summary = _source_warning_summary(prompt)
     files = [
         "README.md",
+        "requirements.txt",
         "src/app.py",
         "src/core/agent.py",
         "tests/test_app.py",
@@ -658,6 +659,12 @@ def _file_manifest_payload(
                     "```\n"
                     f"{warning_note}"
                 ),
+            },
+            {
+                "name": "requirements.txt",
+                "kind": "text",
+                "summary": "Generated Python dependencies for install and health checks.",
+                "content": "fastapi\nuvicorn\npytest\n",
             },
             {
                 "name": "src/app.py",

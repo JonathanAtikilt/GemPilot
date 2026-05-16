@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from base64 import b64decode
+from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -118,6 +118,50 @@ class GitHubClient:
                 "private": private,
                 "auto_init": True,
             },
+        )
+
+    def get_contents_sha(self, repo_name: str, path: str, *, branch: str | None = None) -> str | None:
+        """Return blob SHA for an existing file, or None when the path is not in the repo."""
+
+        if not self.config.owner:
+            raise RuntimeError("GITHUB_OWNER is required for live GitHub mode.")
+        query = f"?ref={branch}" if branch else ""
+        try:
+            contents = self.request(
+                "GET",
+                f"/repos/{self.config.owner}/{repo_name}/contents/{path}{query}",
+            )
+        except RuntimeError as exc:
+            if "404" in str(exc):
+                return None
+            raise
+        sha = contents.get("sha")
+        return str(sha) if sha else None
+
+    def put_contents(
+        self,
+        repo_name: str,
+        path: str,
+        content: str,
+        message: str,
+        *,
+        branch: str | None = None,
+        sha: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.config.owner:
+            raise RuntimeError("GITHUB_OWNER is required for live GitHub mode.")
+        payload: dict[str, Any] = {
+            "message": message,
+            "content": b64encode(content.encode("utf-8")).decode("ascii"),
+        }
+        if branch:
+            payload["branch"] = branch
+        if sha:
+            payload["sha"] = sha
+        return self.request(
+            "PUT",
+            f"/repos/{self.config.owner}/{repo_name}/contents/{path}",
+            payload,
         )
 
     def create_blob(self, repo_name: str, content: str) -> dict[str, Any]:
@@ -347,10 +391,16 @@ def _finalize_commit_result(
     active_config: GitHubConfig,
     commit_sha: str,
     branch: str,
+    allow_existing_repo: bool = False,
 ) -> dict:
     from tools.verifier import verify_commit
 
-    verification = verify_commit(request.repo_name, commit_sha, config=active_config)
+    verification = verify_commit(
+        request.repo_name,
+        commit_sha,
+        config=active_config,
+        allow_existing_repo=allow_existing_repo,
+    )
     verification_status = verification.get("verification_status", "failed")
     output = {
         "repo_name": request.repo_name,
@@ -384,16 +434,57 @@ def _commit_files_to_empty_repository(
     branch: str,
     config: GitHubConfig,
 ) -> dict:
-    tree_elements = _tree_elements_from_files(client, request.repo_name, request.files)
-    tree = client.create_tree(request.repo_name, tree_elements)
-    commit = client.create_commit(request.repo_name, request.message, tree["sha"])
+    """Bootstrap an empty GitHub repo via the Contents API, then commit any remaining files."""
+
+    first_file = request.files[0]
+    existing_sha = client.get_contents_sha(request.repo_name, first_file.path, branch=branch)
+    created = client.put_contents(
+        request.repo_name,
+        first_file.path,
+        first_file.content,
+        request.message,
+        branch=branch if existing_sha else None,
+        sha=existing_sha,
+    )
+    commit_sha = str(((created.get("commit") or {}).get("sha")) or "")
+    if not commit_sha:
+        return ToolResult.failure(
+            "github.commit_files",
+            "GitHub did not return a commit SHA when seeding the empty repository.",
+        ).model_dump(mode="json")
+
+    repo_meta = client.get_repo(request.repo_name)
+    active_branch = repo_meta.get("default_branch") or branch or "main"
+
+    if len(request.files) == 1:
+        return _finalize_commit_result(
+            request=request,
+            active_config=config,
+            commit_sha=commit_sha,
+            branch=active_branch,
+            allow_existing_repo=True,
+        )
+
+    ref = client.get_ref(request.repo_name, active_branch)
+    parent_sha = ref["object"]["sha"]
+    parent_commit = client.get_commit(request.repo_name, parent_sha)
+    base_tree_sha = parent_commit["commit"]["tree"]["sha"]
+    tree_elements = _tree_elements_from_files(client, request.repo_name, request.files[1:])
+    tree = client.create_tree(request.repo_name, tree_elements, base_tree_sha=base_tree_sha)
+    commit = client.create_commit(
+        request.repo_name,
+        request.message,
+        tree["sha"],
+        parent_sha=parent_sha,
+    )
     commit_sha = commit["sha"]
-    client.create_ref(request.repo_name, branch, commit_sha)
+    client.update_ref(request.repo_name, active_branch, commit_sha)
     return _finalize_commit_result(
         request=request,
         active_config=config,
         commit_sha=commit_sha,
-        branch=branch,
+        branch=active_branch,
+        allow_existing_repo=True,
     )
 
 
@@ -431,13 +522,6 @@ def commit_files(
     try:
         repo = client.get_repo(request.repo_name)
         branch = repo.get("default_branch") or "main"
-        if repo.get("size", 1) == 0:
-            return _commit_files_to_empty_repository(
-                client,
-                request,
-                branch=branch,
-                config=active_config,
-            )
 
         try:
             ref = client.get_ref(request.repo_name, branch)
@@ -469,6 +553,7 @@ def commit_files(
             active_config=active_config,
             commit_sha=commit_sha,
             branch=branch,
+            allow_existing_repo=allow_existing_repo,
         )
     except Exception as exc:
         return ToolResult.failure("github.commit_files", str(exc)).model_dump(mode="json")

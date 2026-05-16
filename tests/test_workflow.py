@@ -453,7 +453,7 @@ async def test_workflow_memory_integration(mock_live_rag_search):
         # Verify write_memory was called
         mock_store.write_memory.assert_awaited_once()
         written_memory = mock_store.write_memory.call_args[0][0]
-        assert written_memory["task_id"] == response.task_id
+        assert written_memory["outcome"]["workflow_task_id"] == response.task_id
         assert written_memory["idea"] == "Memory test idea"
         assert "embedding" in written_memory
     

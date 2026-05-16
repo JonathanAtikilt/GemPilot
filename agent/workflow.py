@@ -41,6 +41,7 @@ from agent.frontend_intake import (
 )
 from agent.github_oauth import GitHubConnectionService, GitHubOAuthError
 from agent.live_adapters import LiveRagMemoryAdapter
+from tools.build_checker import merge_repo_health_scaffold
 from agent.openclaw_runtime import (
     registered_tools_for_settings,
     runtime_name_for_settings,
@@ -570,7 +571,7 @@ def build_workflow(
 
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
         repo_name = state.get("repo", {}).get("name", "mvpilot-demo")
-        files = _files_from_generated_artifacts(state["generated_artifacts"])
+        files = merge_repo_health_scaffold(_files_from_generated_artifacts(state["generated_artifacts"]))
         tool_call = active_tools.commit_files(
             repo_name=repo_name,
             files=files,
@@ -606,7 +607,7 @@ def build_workflow(
             repo_name=repo_name,
         )
         status = "completed" if tool_call["status"] == "success" else "blocked"
-        return {
+        update: dict[str, Any] = {
             **append_step(
                 state=state,
                 node_name="verify_build",
@@ -625,6 +626,13 @@ def build_workflow(
             "openclaw_trace": _openclaw_trace_from_tool_call(tool_call),
             "last_tool_result": tool_call,
         }
+        if tool_call["status"] != "success":
+            update["failure_reason"] = (
+                tool_call.get("error")
+                or tool_call.get("summary")
+                or "Generated repository health check failed."
+            )
+        return update
 
     async def handle_blocker(state: WorkflowState) -> dict[str, Any]:
         result = await active_model_client.complete_structured(
@@ -777,7 +785,15 @@ def build_workflow(
     async def remember_outcome(state: WorkflowState) -> dict[str, Any]:
         final_report = state.get("final_report", {})
         summary = final_report.get("summary", "Workflow completed.")
-        
+
+        build_decisions = [
+            {
+                "node_name": step.node_name,
+                "status": step.status,
+                "message": step.message,
+            }
+            for step in state.get("graph_trace", [])
+        ]
         payload = {
             "task_id": state["task_id"],
             "idea": state["idea"],
@@ -789,22 +805,26 @@ def build_workflow(
                 "file_tree": [artifact.get("name") for artifact in state.get("generated_artifacts", [])],
                 "generated_artifacts": state.get("generated_artifacts"),
                 "github_result": _last_tool_call(state, "github.commit_files") or _last_tool_call(state, "github.create_repo"),
-                "build_decisions": [step.model_dump(mode="json") for step in state.get("graph_trace", [])],
+                "build_decisions": build_decisions,
                 "errors_and_fixes": state.get("blocker_analysis"),
                 "final_report": final_report,
             },
             "tags": ["workflow_outcome"],
         }
-        await active_retrieval.write_memory(payload)
-        
+        memory_trace = [
+            "Captured plan, file tree, GitHub result summary, decisions, and final landing summary.",
+        ]
+        try:
+            await active_retrieval.write_memory(payload)
+            memory_trace.append("Wrote memory to storage.")
+        except Exception as exc:
+            memory_trace.append(f"Memory write skipped: {exc}")
+
         return append_step(
             state=state,
             node_name="remember_outcome",
             message="Stored the outcome for future retrieval.",
-            decision_trace=[
-                "Captured plan, file tree, GitHub result summary, decisions, and final landing summary.",
-                "Wrote memory to storage.",
-            ],
+            decision_trace=memory_trace,
         )
 
     def report_result(state: WorkflowState) -> dict[str, Any]:
@@ -822,7 +842,17 @@ def build_workflow(
         }
 
     def failed(state: WorkflowState) -> dict[str, Any]:
-        reason = state.get("failure_reason") or "Unrecoverable mock tool failure."
+        last_tool = state.get("last_tool_result") or {}
+        reason = (
+            state.get("failure_reason")
+            or last_tool.get("error")
+            or last_tool.get("summary")
+            or (
+                "Unrecoverable mock tool failure."
+                if state["mock_mode"]
+                else "Workflow stopped after an unrecoverable tool failure."
+            )
+        )
         final_report = {
             "status": "failed",
             "mode": "mock" if state["mock_mode"] else "live",

@@ -13,7 +13,7 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
 from agent.config import Settings
-from tools.github_tool import GitHubConfig
+from tools.github_tool import GitHubConfig, check_github_auth
 from tools.policy import repo_prefix
 
 
@@ -233,6 +233,24 @@ class GitHubConnectionService:
         )
         return self._store.update(updated)
 
+    def _is_env_token_connection(self, record: GitHubConnectionRecord) -> bool:
+        return record.github_user_id is None and record.encrypted_pending_code is None
+
+    def _refresh_env_token_from_settings(self, record: GitHubConnectionRecord) -> GitHubConnectionRecord:
+        if not self._is_env_token_connection(record) or not self._settings.github_pat_configured:
+            return record
+        token = self._settings.github_personal_access_token
+        if not token:
+            return record
+        owner = (self._settings.github_owner or record.github_login or "").strip()
+        updated = replace(
+            record,
+            encrypted_access_token=self._encrypt(token.get_secret_value()),
+            github_login=owner or record.github_login,
+            updated_at=datetime.now(UTC),
+        )
+        return self._store.update(updated)
+
     async def exchange_for_workflow(
         self,
         connection_id: str,
@@ -241,6 +259,7 @@ class GitHubConnectionService:
     ) -> GitHubWorkflowAuth:
         record = self._store.get_connection(connection_id)
         if record.status == "exchanged" and record.encrypted_access_token and record.github_login:
+            record = self._refresh_env_token_from_settings(record)
             token = self.decrypt_access_token(record)
             return GitHubWorkflowAuth(
                 connection_id=record.id,
@@ -334,6 +353,20 @@ class GitHubConnectionService:
         self._require_encryption_key()
         token = self._settings.github_personal_access_token
         owner = (self._settings.github_owner or "").strip()
+        auth_check = check_github_auth(
+            GitHubConfig(
+                token=token.get_secret_value() if token else None,
+                owner=owner,
+                repo_prefix=repo_prefix(),
+                mock_tools=False,
+            )
+        )
+        if auth_check.get("status") != "success":
+            detail = auth_check.get("error") or "GITHUB_TOKEN failed GitHub authentication."
+            raise GitHubOAuthError(detail)
+        verified_login = str((auth_check.get("output") or {}).get("login") or owner).strip()
+        if verified_login:
+            owner = verified_login
         connection_id = str(uuid4())
         now = datetime.now(UTC)
         record = GitHubConnectionRecord(
