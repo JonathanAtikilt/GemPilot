@@ -35,12 +35,14 @@ def verify_commit(
     commit_sha: str,
     *,
     config: GitHubConfig | None = None,
+    allow_existing_repo: bool = False,
 ) -> dict:
     """Confirm a commit exists in the generated repository and list changed files."""
 
-    repo_error = validate_generated_repo_name(repo_name)
-    if repo_error:
-        return repo_error.model_dump(mode="json")
+    if not allow_existing_repo:
+        repo_error = validate_generated_repo_name(repo_name)
+        if repo_error:
+            return repo_error.model_dump(mode="json")
 
     if not commit_sha.strip():
         return ToolResult.failure("github.verify_commit", "Commit SHA must not be empty.").model_dump(mode="json")

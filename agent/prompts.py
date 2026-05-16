@@ -90,7 +90,9 @@ def build_file_manifest_prompt(
         f"Resolved tech stack:\n{_json_block(resolved_stack)}\n\n"
         f"Repo plan:\n{_json_block(repo_plan)}\n\n"
         "Return artifact names, kinds, summaries, optional content, mode, and "
-        "decision trace."
+        "decision trace. The manifest must include README.md, docs/ARCHITECTURE.md, "
+        "docs/BUILD_LOG.md (or logs/build_log.md), demo/demo_script.md, "
+        "requirements.txt or package.json, and at least one file under src/ or backend/."
     )
 
 

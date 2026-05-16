@@ -3,7 +3,7 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 from tools import mock_store
-from tools.build_checker import check_repo_health
+from tools.build_checker import check_repo_health, merge_repo_health_scaffold
 from tools.github_tool import GitHubConfig, GitHubClient, check_github_auth, commit_files, create_repo
 from tools.repo_writer import append_build_log
 from tools.verifier import verify_commit
@@ -242,6 +242,7 @@ class Person3GitHubToolTests(unittest.TestCase):
             "mvpilot-generated-demo",
             "new-commit-sha",
             config=config,
+            allow_existing_repo=False,
         )
 
     def test_commit_files_seeds_initial_commit_for_empty_repository(self):
@@ -266,15 +267,16 @@ class Person3GitHubToolTests(unittest.TestCase):
         ):
             client = client_class.return_value
             client.get_repo.return_value = {"default_branch": "main", "size": 0}
-            client.create_blob.return_value = {"sha": "blob-sha"}
-            client.create_tree.return_value = {"sha": "new-tree-sha"}
-            client.create_commit.return_value = {"sha": "new-commit-sha"}
-            client.create_ref.return_value = {"ref": "refs/heads/main", "object": {"sha": "new-commit-sha"}}
+            client.get_ref.side_effect = RuntimeError(
+                'GitHub API HTTP 409: {"message": "Git Repository is empty."}'
+            )
+            client.get_contents_sha.return_value = None
+            client.put_contents.return_value = {"commit": {"sha": "seed-commit-sha"}}
             verify_mock.return_value = {
                 "tool_name": "github.verify_commit",
                 "status": "success",
                 "verification_status": "verified",
-                "output": {"commit_sha": "new-commit-sha"},
+                "output": {"commit_sha": "seed-commit-sha"},
                 "error": None,
             }
 
@@ -287,13 +289,57 @@ class Person3GitHubToolTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "success")
-        client.get_ref.assert_not_called()
-        client.create_ref.assert_called_once_with("my-existing-repo", "main", "new-commit-sha")
-        client.create_commit.assert_called_once_with(
-            "my-existing-repo",
-            "Add generated MVPilot package",
-            "new-tree-sha",
+        client.put_contents.assert_called_once()
+        client.get_ref.assert_called_once()
+        client.create_ref.assert_not_called()
+
+    def test_commit_files_uses_tree_api_when_ref_exists_even_if_repo_size_is_zero(self):
+        """auto_init repos can report size=0 while README already exists on the default branch."""
+
+        config = GitHubConfig(
+            token="task-token",
+            owner="connected-owner",
+            repo_prefix="mvpilot-generated-",
+            mock_tools=False,
         )
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "env-token",
+                    "GITHUB_OWNER": "env-owner",
+                    "MVPILOT_MOCK_TOOLS": "false",
+                },
+                clear=True,
+            ),
+            patch("tools.github_tool.GitHubClient") as client_class,
+            patch("tools.verifier.verify_commit") as verify_mock,
+        ):
+            client = client_class.return_value
+            client.get_repo.return_value = {"default_branch": "main", "size": 0}
+            client.get_ref.return_value = {"object": {"sha": "parent-sha"}}
+            client.get_commit.return_value = {"commit": {"tree": {"sha": "tree-sha"}}}
+            client.create_blob.return_value = {"sha": "blob-sha"}
+            client.create_tree.return_value = {"sha": "new-tree-sha"}
+            client.create_commit.return_value = {"sha": "new-commit-sha"}
+            verify_mock.return_value = {
+                "tool_name": "github.verify_commit",
+                "status": "success",
+                "verification_status": "verified",
+                "output": {"commit_sha": "new-commit-sha"},
+                "error": None,
+            }
+
+            result = commit_files(
+                "mvpilot-generated-demo",
+                [{"path": "README.md", "content": "# Demo"}],
+                "Add README",
+                config=config,
+            )
+
+        self.assertEqual(result["status"], "success")
+        client.put_contents.assert_not_called()
+        client.create_tree.assert_called_once()
 
     def test_commit_files_rejects_empty_file_list(self):
         with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):
@@ -482,6 +528,27 @@ class Person3GitHubToolTests(unittest.TestCase):
         self.assertFalse(result["output"]["content_verified"])
         self.assertTrue(result["output"]["commit_verified"])
         self.assertEqual(result["output"]["verification_method"], "commit")
+
+    def test_merge_repo_health_scaffold_adds_missing_package_and_source_files(self):
+        merged = merge_repo_health_scaffold(
+            [
+                {"path": "README.md", "content": "# Demo"},
+                {"path": "docs/BUILD_LOG.md", "content": "# Log"},
+                {"path": "docs/ARCHITECTURE.md", "content": "# Architecture"},
+                {"path": "demo/demo_script.md", "content": "Demo"},
+            ]
+        )
+        paths = {file["path"] for file in merged}
+
+        self.assertIn("requirements.txt", paths)
+        self.assertTrue(any(path.startswith("src/") for path in paths))
+
+        with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):
+            commit_files("mvpilot-generated-demo", merged, "Add scaffolded package")
+            result = check_repo_health("mvpilot-generated-demo")
+
+        self.assertEqual(result["status"], "mock")
+        self.assertTrue(result["output"]["healthy"])
 
     def test_repo_health_passes_for_complete_mock_repo(self):
         with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):

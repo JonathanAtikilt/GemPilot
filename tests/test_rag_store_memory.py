@@ -46,10 +46,11 @@ async def test_write_memory():
 
         store = SupabaseRagStore()
         memory = {
-            "task_id": "test_task",
             "idea": "test idea",
             "summary": "test summary",
-            "embedding": [0.1, 0.2]
+            "outcome": {"workflow_task_id": "test_task"},
+            "tags": ["workflow_outcome"],
+            "embedding": [0.1, 0.2],
         }
         await store.write_memory(memory)
 

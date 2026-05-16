@@ -311,7 +311,7 @@ export default function Home() {
         }
         if (status === "failed") {
           setSubmitState("error");
-          const failedStep = detail.agent_steps.find((step) => step.status === "failed");
+          const failedStep = [...(detail.agent_steps ?? [])].reverse().find((step) => step.status === "failed");
           const rawMessage =
             failedStep?.message
             || detail.final_report?.summary
@@ -382,19 +382,17 @@ export default function Home() {
       return;
     }
 
-    if (githubOAuthConfig && !githubOAuthConfig.oauthConfigured) {
-      setGithubMessage(
-        `GitHub OAuth is not configured. Set ${(githubOAuthConfig.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_TOKEN_ENCRYPTION_KEY"]).join(", ")} in the backend .env, then register ${githubOAuthConfig.redirectUri || "the callback URL"} in your GitHub OAuth app.`,
-      );
-      return;
-    }
-
     const params = new URLSearchParams({
       return_to: githubReturnTo(),
     });
 
-    window.location.href = `${apiBaseUrl}/api/auth/github/login?${params.toString()}`;
+    // Always hit the backend login route. If OAuth is not configured, the backend redirects
+    // back with github_status=error so readGithubCallbackState() can surface the message.
+    window.location.assign(`${apiBaseUrl}/api/auth/github/login?${params.toString()}`);
   }
+
+  const oauthReady = githubOAuthConfig?.oauthConfigured === true;
+  const patReady = githubOAuthConfig?.patConfigured === true;
 
   async function connectGitHubWithEnvToken() {
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
@@ -634,15 +632,30 @@ export default function Home() {
                         <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect OAuth</button>
-                          {githubOAuthConfig?.patConfigured ? (
+                          <button
+                            type="button"
+                            onClick={connectGitHub}
+                            disabled={githubOAuthConfig !== null && !oauthReady}
+                            title={oauthReady ? "Sign in with GitHub OAuth" : "OAuth is not configured in backend .env"}
+                            className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)] disabled:cursor-not-allowed disabled:bg-[#31353f] disabled:text-[#849495]"
+                          >
+                            Connect OAuth
+                          </button>
+                          {patReady ? (
                             <button type="button" onClick={() => void connectGitHubWithEnvToken()} className="rounded border border-[#4edea3]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#4edea3] transition hover:bg-[#4edea3]/10">Use backend token</button>
                           ) : null}
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 flex items-start justify-between gap-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">
-                      <p className="text-sm leading-6 text-[#b9cacb]">{githubMessage}</p>
+                    {githubOAuthConfig && !oauthReady ? (
+                      <p className="mt-3 rounded border border-[#ffb4ab]/40 bg-[#93000a]/20 px-3 py-2 text-xs leading-5 text-[#ffb4ab]">
+                        OAuth is not set up on the backend. Use <strong>Use backend token</strong> instead, or add{" "}
+                        {(githubOAuthConfig.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"]).join(", ")} to .env and register{" "}
+                        <span className="font-mono">{githubOAuthConfig.redirectUri}</span> in a GitHub OAuth app.
+                      </p>
+                    ) : null}
+                    <div className={`mt-3 flex items-start justify-between gap-3 rounded border bg-[#0a0e17] px-3 py-2 ${githubMessage.toLowerCase().includes("not configured") ? "border-[#ffb4ab]/40" : "border-[#3a494b]"}`}>
+                      <p className={`text-sm leading-6 ${githubMessage.toLowerCase().includes("not configured") ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{githubMessage}</p>
                       <StatusPill status={githubConnectionId ? "Complete" : "Ready"} />
                     </div>
                   </section>

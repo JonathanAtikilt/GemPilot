@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.dependencies import get_github_connection_service
+from agent.dependencies import get_github_connection_service, reload_runtime_settings
 from agent.github_oauth import GitHubConnectionService, GitHubOAuthError
 from tools.github_tool import GitHubConfig, commit_files, create_repo
 
@@ -42,9 +42,11 @@ async def github_oauth_config(
 
 @auth_router.post("/use-env-token")
 async def github_use_env_token(
+    request: Request,
     return_to: str | None = Query(default=None),
-    service: GitHubConnectionService = Depends(get_github_connection_service),
 ) -> dict[str, object]:
+    settings = reload_runtime_settings(request)
+    service: GitHubConnectionService = request.app.state.github_connection_service
     try:
         record = service.create_env_token_connection(return_to)
     except GitHubOAuthError as exc:
@@ -55,6 +57,8 @@ async def github_use_env_token(
         "username": record.github_login,
         "status": record.status,
         "mode": "env_token",
+        "patTokenType": settings.github_pat_token_type,
+        "canCreateRepositories": settings.github_pat_can_create_repositories,
     }
 
 

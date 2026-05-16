@@ -124,7 +124,8 @@ class AgentService:
         detail: TaskDetailResponse,
         exc: Exception,
     ) -> dict[str, Any]:
-        message = "Workflow failed before the graph could finish."
+        detail_message = str(exc).strip() or exc.__class__.__name__
+        message = f"Workflow failed before the graph could finish: {detail_message}"
         step = AgentStep(
             project_id=detail.task.id,
             flight_stage="failed",
@@ -134,8 +135,8 @@ class AgentService:
             message=message,
             model=self._settings.nemotron_fast_model,
             decision_trace=[
-                "Mock mode: deterministic failure fallback.",
-                f"Captured unexpected error: {exc.__class__.__name__}.",
+                "Unhandled exception stopped the LangGraph workflow.",
+                f"{exc.__class__.__name__}: {detail_message}",
             ],
             timestamp=datetime.now(UTC),
         )
@@ -153,7 +154,7 @@ class AgentService:
             "graph_trace": [*detail.graph_trace, step],
             "final_report": {
                 "status": "failed",
-                "mode": "mock",
+                "mode": "mock" if self._settings.mock_mode else "live",
                 "model": self._settings.nemotron_fast_model,
                 "summary": message,
             },
