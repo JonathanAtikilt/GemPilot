@@ -18,6 +18,7 @@ VALID_IDEA = (
     "Build a healthcare referral coordination agent that helps clinics "
     "prevent failed referrals."
 )
+FRONTEND_IDEA = "Build a study planner that turns messy class notes into a weekly review plan."
 
 
 class CapturingModelClient(DeterministicModelClient):
@@ -192,6 +193,38 @@ async def test_workflow_plan_repo_prompt_uses_default_stack_when_rag_stack_is_em
     assert "Next.js" in plan_prompt
     assert "FastAPI" in plan_prompt
     assert "Supabase Postgres" in plan_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_uses_frontend_intake_and_surfaces_source_warnings(mock_live_rag_search):
+    settings = Settings(_env_file=None, adapter_mode="mock")
+    task_store = InMemoryTaskStore()
+    service = AgentService(task_store, settings)
+    response = await service.start_task(
+        RunAgentRequest(
+            title="Study Planner",
+            idea=FRONTEND_IDEA,
+            repo_visibility="public",
+            demo_mode=True,
+            source="mvpilot_frontend",
+            primary_rules_url="http://127.0.0.1:9/missing-rules",
+        )
+    )
+
+    await service.run_task_workflow(response.task_id)
+
+    detail = await task_store.get_task(response.task_id)
+    assert detail.task.status == TaskStatus.COMPLETED
+    assert detail.build_context["frontendIntake"]["title"] == "Study Planner"
+    assert detail.build_context["frontendIntake"]["idea"] == FRONTEND_IDEA
+    assert detail.build_context["sourceContext"]["warnings"]
+    assert detail.final_report["readme"]["title"] == "Study Planner"
+    assert "Study Planner" in detail.final_report["readme"]["content"]
+    assert FRONTEND_IDEA in detail.final_report["readme"]["content"]
+    assert "Study Planner" in detail.final_report["demo_script"]["title"]
+    assert detail.final_report["pitch"]["title"] == "Study Planner"
+    assert detail.final_report["source_warnings"] == detail.build_context["sourceContext"]["warnings"]
+    assert "healthcare" not in str(detail.final_report).lower()
 
 
 @pytest.mark.asyncio

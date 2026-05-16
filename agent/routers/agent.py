@@ -6,15 +6,18 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from starlette.datastructures import FormData, UploadFile
 
 from agent.dependencies import get_agent_service
 from agent.schemas import (
     ApprovalDecisionRequest,
     ApprovalDecisionResponse,
+    MAX_UPLOADED_FILES,
     RunAgentRequest,
     RunAgentResponse,
     TaskDetailResponse,
 )
+from agent.frontend_intake import MAX_TEXT_FILE_BYTES
 from agent.service import AgentService
 from agent.task_store import ApprovalNotFoundError, TaskNotFoundError
 
@@ -102,13 +105,97 @@ async def _read_json_payload(request: Request) -> dict[str, Any]:
                 }
             ]
         )
-    return payload
+    return _normalize_run_payload(payload)
 
 
 async def _read_form_payload(request: Request) -> dict[str, Any]:
     form = await request.form()
-    return {
+    additional_files, uploaded_file_contents = await _form_file_payloads(
+        form,
+        "additional_files",
+    )
+    payload = {
         "idea": form.get("idea"),
         "repo_visibility": form.get("repo_visibility") or "public",
         "demo_mode": form.get("demo_mode") or False,
+        "title": form.get("title"),
+        "primary_rules_url": form.get("primary_rules_url") or form.get("rules_url"),
+        "additional_urls": _form_text_list(form, "additional_urls"),
+        "additional_files": additional_files,
+        "uploaded_file_contents": uploaded_file_contents,
+        "source": form.get("source"),
+        "github_connected": bool(
+            form.get("github_auth_code") or _truthy_form_value(form.get("github_connected"))
+        ),
+        "github_connection_id": form.get("github_connection_id"),
     }
+    return _normalize_run_payload(payload)
+
+
+def _normalize_run_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = {**payload}
+    if not normalized.get("primary_rules_url") and normalized.get("rules_url"):
+        normalized["primary_rules_url"] = normalized.get("rules_url")
+
+    github_auth_code = normalized.pop("github_auth_code", None)
+    if github_auth_code:
+        normalized["github_connected"] = True
+
+    return normalized
+
+
+def _form_text_list(form: FormData, field_name: str) -> list[str]:
+    values = form.getlist(field_name)
+    return [
+        str(value).strip()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    ]
+
+
+async def _form_file_payloads(
+    form: FormData,
+    field_name: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    files = [
+        value
+        for value in form.getlist(field_name)
+        if isinstance(value, UploadFile) and value.filename
+    ]
+    if len(files) > MAX_UPLOADED_FILES:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "too_long",
+                    "loc": ("body", field_name),
+                    "msg": f"At most {MAX_UPLOADED_FILES} uploaded files are supported",
+                    "input": len(files),
+                }
+            ]
+        )
+
+    metadata: list[dict[str, Any]] = []
+    contents: list[dict[str, Any]] = []
+    for file in files:
+        if file.size is not None and file.size > MAX_TEXT_FILE_BYTES:
+            content = b""
+            size_bytes = file.size
+        else:
+            content = await file.read()
+            await file.seek(0)
+            size_bytes = len(content)
+        item = {
+            "name": file.filename,
+            "content_type": file.content_type or "application/octet-stream",
+            "size_bytes": size_bytes,
+        }
+        metadata.append(item)
+        contents.append({**item, "content": content})
+
+    return metadata, contents
+
+
+def _truthy_form_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)

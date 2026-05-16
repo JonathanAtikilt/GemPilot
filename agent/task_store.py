@@ -12,6 +12,8 @@ from agent.schemas import (
     TaskDetailResponse,
     TaskRecord,
     TaskStatus,
+    UploadedSourceFile,
+    UploadedSourceFileContent,
 )
 
 
@@ -27,6 +29,7 @@ class InMemoryTaskStore:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._tasks: dict[str, TaskDetailResponse] = {}
+        self._uploaded_file_contents: dict[str, list[UploadedSourceFileContent]] = {}
 
     async def create_task(
         self,
@@ -34,11 +37,25 @@ class InMemoryTaskStore:
     ) -> TaskRecord:
         task_id = str(uuid4())
         now = self._now()
+        additional_files = list(request.additional_files)
+        if not additional_files and request.uploaded_file_contents:
+            additional_files = [
+                UploadedSourceFile.model_validate(file.model_dump())
+                for file in request.uploaded_file_contents
+            ]
+
         task = TaskRecord(
             id=task_id,
+            title=request.title,
             idea=request.idea,
             repo_visibility=request.repo_visibility,
             demo_mode=request.demo_mode,
+            source=request.source,
+            primary_rules_url=request.primary_rules_url,
+            additional_urls=list(request.additional_urls),
+            additional_files=additional_files,
+            github_connected=request.github_connected,
+            github_connection_id=request.github_connection_id,
             status=TaskStatus.STARTED,
             created_at=now,
             updated_at=now,
@@ -47,6 +64,10 @@ class InMemoryTaskStore:
 
         async with self._lock:
             self._tasks = {**self._tasks, task_id: detail}
+            self._uploaded_file_contents = {
+                **self._uploaded_file_contents,
+                task_id: list(request.uploaded_file_contents),
+            }
 
         return task.model_copy(deep=True)
 
@@ -56,6 +77,18 @@ class InMemoryTaskStore:
             if detail is None:
                 raise TaskNotFoundError(task_id)
             return detail.model_copy(deep=True)
+
+    async def get_uploaded_file_contents(
+        self,
+        task_id: str,
+    ) -> list[UploadedSourceFileContent]:
+        async with self._lock:
+            if task_id not in self._tasks:
+                raise TaskNotFoundError(task_id)
+            return [
+                file.model_copy(deep=True)
+                for file in self._uploaded_file_contents.get(task_id, [])
+            ]
 
     async def snapshot_task(
         self,

@@ -33,7 +33,13 @@ from agent.prompts import (
 )
 from agent.schemas import AgentStep
 from agent.adapters import AuditAdapter, RagMemoryAdapter, ToolAdapter, InMemoryAuditAdapter, InMemoryToolAdapter
+from agent.frontend_intake import (
+    FrontendIntake,
+    build_optional_params_from_frontend_intake,
+    build_source_context,
+)
 from agent.live_adapters import LiveRagMemoryAdapter
+from agent.schemas import UploadedSourceFileContent
 
 ListReducer = Annotated[list[dict[str, Any]], operator.add]
 StepReducer = Annotated[list[AgentStep], operator.add]
@@ -52,6 +58,8 @@ class WorkflowState(TypedDict):
     graph_trace: StepReducer
     retrieved_docs: ListReducer
     build_context: NotRequired[dict[str, Any]]
+    frontend_intake: NotRequired[dict[str, Any]]
+    uploaded_file_contents: NotRequired[list[dict[str, Any]]]
     memory_matches: ListReducer
     tool_calls: ListReducer
     generated_artifacts: ListReducer
@@ -76,7 +84,10 @@ def build_initial_state(
     repo_visibility: Literal["public", "private"],
     demo_mode: bool,
     settings: Settings,
+    frontend_intake: dict[str, Any] | None = None,
+    uploaded_file_contents: list[dict[str, Any]] | None = None,
 ) -> WorkflowState:
+    normalized_intake = frontend_intake or FrontendIntake(idea=idea).model_dump()
     return {
         "task_id": task_id,
         "idea": idea,
@@ -90,6 +101,8 @@ def build_initial_state(
         "graph_trace": [],
         "retrieved_docs": [],
         "build_context": {},
+        "frontend_intake": normalized_intake,
+        "uploaded_file_contents": uploaded_file_contents or [],
         "memory_matches": [],
         "tool_calls": [],
         "generated_artifacts": [],
@@ -162,11 +175,28 @@ def build_workflow(
         )
 
     async def retrieve_context(state: WorkflowState) -> dict[str, Any]:
+        frontend_intake = FrontendIntake.model_validate(
+            state.get("frontend_intake") or {"idea": state["idea"]}
+        )
         build_context = await active_retrieval.retrieve_build_context(
             state["task_id"],
             state["idea"],
+            optional_params=build_optional_params_from_frontend_intake(frontend_intake),
             top_k=8,
         )
+        uploaded_files = [
+            UploadedSourceFileContent.model_validate(file)
+            for file in state.get("uploaded_file_contents", [])
+        ]
+        source_context = await build_source_context(
+            frontend_intake,
+            uploaded_files=uploaded_files,
+        )
+        build_context = {
+            **build_context,
+            "frontendIntake": frontend_intake.model_dump(),
+            "sourceContext": source_context,
+        }
         docs = (
             await active_retrieval.retrieve_hackathon_context(state["idea"])
             + await active_retrieval.retrieve_nvidia_context(state["idea"])
@@ -197,6 +227,8 @@ def build_workflow(
                     f"Structured constraints: {len(build_context.get('requiredDeliverables', []))} deliverables, "
                     f"{len(build_context.get('requiredTechStackPieces', []))} stack items, "
                     f"{critical_count} critical priorities, {evidence_count} evidence chunks.",
+                    f"Frontend intake title: {frontend_intake.title or 'not provided'}.",
+                    f"Source context warnings: {source_context['sourceCounts']['warnings']}.",
                     f"Augmented with {len(docs)} retrieved doc matches and {len(memories)} memory matches.",
                 ],
             ),
@@ -277,6 +309,7 @@ def build_workflow(
             prompt=build_file_manifest_prompt(
                 idea=state["idea"],
                 repo_plan=state.get("repo_plan", {}),
+                build_context=state.get("build_context", {}),
             ),
             response_model=FileManifestOutput,
             max_tokens=1200,
@@ -377,6 +410,7 @@ def build_workflow(
                 mvp_scope=state.get("mvp_scope", {}),
                 repo_plan=state.get("repo_plan", {}),
                 generated_artifacts=state["generated_artifacts"],
+                build_context=state.get("build_context", {}),
             ),
             response_model=FinalReadmeOutput,
             max_tokens=1400,
@@ -388,6 +422,7 @@ def build_workflow(
             prompt=build_demo_script_prompt(
                 idea=state["idea"],
                 blocker_analysis=state.get("blocker_analysis"),
+                build_context=state.get("build_context", {}),
             ),
             response_model=DemoScriptOutput,
             max_tokens=1100,
@@ -400,6 +435,7 @@ def build_workflow(
                 idea=state["idea"],
                 final_readme=readme_result.output.model_dump(),
                 demo_script=demo_result.output.model_dump(),
+                build_context=state.get("build_context", {}),
             ),
             response_model=PitchOutput,
             max_tokens=1100,
@@ -409,6 +445,7 @@ def build_workflow(
         readme = readme_result.output.model_dump()
         demo_script = demo_result.output.model_dump()
         pitch = pitch_result.output.model_dump()
+        source_warnings = _source_warnings(state.get("build_context", {}))
         final_report = {
             "status": "completed",
             "mode": package_mode,
@@ -422,13 +459,17 @@ def build_workflow(
             "demo_script": demo_script,
             "pitch": pitch,
             "blocker_analysis": state.get("blocker_analysis"),
+            "source_warnings": source_warnings,
             "artifact_count": len(state["generated_artifacts"]) + 1,
         }
         final_artifact = {
             "name": "final_report.json",
             "kind": "json",
             "mock_mode": package_mode != "live",
-            "summary": f"{package_mode.title()} mode: generated final package report.",
+            "summary": (
+                f"{package_mode.title()} mode: generated final package report"
+                f" with {len(source_warnings)} source warnings."
+            ),
         }
         combined_result = ModelCallResult(
             output=pitch_result.output,
@@ -581,6 +622,12 @@ def _package_mode(results: list[ModelCallResult]) -> Literal["mock", "live", "fa
     if modes == {"live"}:
         return "live"
     return "mock"
+
+
+def _source_warnings(build_context: dict[str, Any]) -> list[dict[str, str]]:
+    source_context = build_context.get("sourceContext", {})
+    warnings = source_context.get("warnings") if isinstance(source_context, dict) else []
+    return [warning for warning in warnings if isinstance(warning, dict)]
 
 
 def route_after_tool_result(state: dict[str, Any]) -> str:
