@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.config import Settings
 from agent.dependencies import build_settings
+from agent.rag.routes import router as rag_router
 from agent.routers.agent import router as agent_router
 from agent.routers.health import router as health_router
 from agent.service import AgentService
 from agent.task_store import InMemoryTaskStore
+
+load_dotenv()
 
 
 def create_app(
@@ -34,6 +38,7 @@ def create_app(
     )
     app.include_router(health_router)
     app.include_router(agent_router)
+    app.include_router(rag_router, prefix="/rag", tags=["rag"])
     return app
 
 
