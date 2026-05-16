@@ -1,6 +1,10 @@
 import asyncio
 from uuid import UUID, uuid4
 
+from agent.config import Settings
+from agent.main import create_app
+from fastapi.testclient import TestClient
+
 
 VALID_IDEA = (
     "Build a healthcare referral coordination agent that helps clinics "
@@ -206,6 +210,9 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     data = response.json()
     assert set(data) == {
         "task",
+        "runtime",
+        "registered_tools",
+        "openclaw_trace",
         "agent_steps",
         "retrieved_docs",
         "build_context",
@@ -217,6 +224,9 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
         "final_report",
     }
     assert data["build_context"]["requiredDeliverables"]
+    assert data["runtime"] == "langgraph"
+    assert data["registered_tools"] == []
+    assert data["openclaw_trace"] == []
     assert data["task"]["id"] == task_id
     assert data["task"]["idea"] == VALID_IDEA
     assert data["task"]["repo_visibility"] == "public"
@@ -279,6 +289,34 @@ def test_task_detail_returns_404_for_missing_tasks(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Task not found"
+
+
+def test_task_detail_surfaces_openclaw_runtime_trace(mock_live_rag_search):
+    app = create_app(
+        settings=Settings(
+            _env_file=None,
+            adapter_mode="mock",
+            openclaw_api_key="fake-openclaw-key",
+            openclaw_env="development",
+        )
+    )
+
+    with TestClient(app) as client:
+        task_id = start_task(client)
+        response = client.get(f"/agent/tasks/{task_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["runtime"] == "openclaw"
+    assert "github.create_repo" in data["registered_tools"]
+    assert [entry["tool"] for entry in data["openclaw_trace"]] == [
+        "github.create_repo",
+        "github.commit_files",
+        "build.verify",
+        "build.apply_recovery_patch",
+        "build.verify",
+    ]
+    assert all(tool_call["runtime"] == "openclaw" for tool_call in data["tool_calls"])
 
 
 def test_approve_rejects_invalid_decisions(client):

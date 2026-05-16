@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from agent.config import Settings
 from agent.dependencies import get_settings
+from agent.openclaw_runtime import openclaw_runtime_status
 from agent.rag.env_status import rag_env_status
 
 router = APIRouter()
@@ -12,6 +13,7 @@ router = APIRouter()
 @router.get("/health")
 async def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     rag_status = rag_env_status()
+    openclaw_status = openclaw_runtime_status(settings)
     return {
         "status": settings.health_status,
         "adapter_mode": settings.adapter_mode,
@@ -21,6 +23,7 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, object
         "nvidia_configured": settings.nvidia_configured,
         "openclaw_configured": settings.openclaw_configured,
         "openclaw_env": settings.openclaw_env,
+        **openclaw_status,
         "supabase_configured": settings.supabase_configured,
         "rag_configured": rag_status["configured"],
         "rag_missing_env": rag_status["missing_required"],

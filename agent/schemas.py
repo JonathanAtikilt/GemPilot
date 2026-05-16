@@ -164,6 +164,9 @@ class ApprovalRecord(BaseModel):
 
 class TaskDetailResponse(BaseModel):
     task: TaskRecord
+    runtime: str = "langgraph"
+    registered_tools: list[str] = Field(default_factory=list)
+    openclaw_trace: list[dict[str, Any]] = Field(default_factory=list)
     agent_steps: list[AgentStep] = Field(default_factory=list)
     retrieved_docs: list[dict[str, Any]] = Field(default_factory=list)
     build_context: dict[str, Any] | None = None

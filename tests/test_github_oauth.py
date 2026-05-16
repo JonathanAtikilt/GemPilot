@@ -16,7 +16,7 @@ from agent.main import create_app
 def github_settings() -> Settings:
     return Settings(
         _env_file=None,
-        adapter_mode="live",
+        adapter_mode="mock",
         cors_origins=["http://localhost:3000"],
         frontend_base_url="http://localhost:3000",
         github_oauth_client_id="client-id",
