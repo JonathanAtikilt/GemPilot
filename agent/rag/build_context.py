@@ -29,10 +29,13 @@ BUILD_CONTEXT_DOC_TYPES: list[DocType] = [
     "repository_format",
     "demo_format",
     "tech_stack",
+    "security_constraints",
+    "agent_boundaries",
     "scope_warning",
     "hackathon_rules",
     "nvidia_docs",
     "nvidia_model_docs",
+    "nvidia_model_usage",
     "agent_architecture",
     "implementation_constraints",
     "generated_project_doc",
@@ -44,9 +47,12 @@ DOC_TYPE_TO_CATEGORY: dict[DocType, BuildContextResponseCategory] = {
     "repository_format": "requiredRepositoryFormat",
     "demo_format": "requiredDemoFormat",
     "tech_stack": "requiredTechStackPieces",
+    "security_constraints": "scopeWarnings",
+    "agent_boundaries": "scopeWarnings",
     "hackathon_rules": "requiredDeliverables",
     "nvidia_docs": "requiredTechStackPieces",
     "nvidia_model_docs": "requiredTechStackPieces",
+    "nvidia_model_usage": "requiredTechStackPieces",
     "agent_architecture": "requiredTechStackPieces",
     "implementation_constraints": "scopeWarnings",
     "generated_project_doc": "requiredRepositoryFormat",
@@ -107,6 +113,39 @@ _DEFAULT_STACK_ALIASES: dict[str, tuple[str, ...]] = {
     "pytest": ("pytest",),
     "npm run build": ("npm run build", "npm build"),
 }
+
+FALLBACK_BUILD_ITEMS: dict[BuildContextResponseCategory, tuple[str, ...]] = {
+    "requiredDeliverables": (
+        "Working MVP that demonstrates the submitted idea end to end",
+        "README.md with setup, architecture, and NVIDIA/Nemotron usage notes",
+    ),
+    "allowedToolsAndAPIs": (
+        "Use NVIDIA/Nemotron APIs for reasoning, embeddings, and reranking when configured",
+        "Use GitHub API through backend-owned OAuth or backend environment credentials only",
+        "Use Supabase Postgres and pgvector for RAG, memory, audit, and shared project state",
+    ),
+    "requiredRepositoryFormat": (
+        "README.md at the repository root",
+        "docs/ARCHITECTURE.md and docs/BUILD_LOG.md for judge-visible evidence",
+        ".env.example may be committed with placeholders; real .env files must never be committed",
+    ),
+    "requiredDemoFormat": (
+        "Frontend launches the project and shows flight-stage progress",
+        "Orchestrator retrieves RAG evidence before planning and GitHub actions",
+        "Final landing card shows repository, commit, build log, and architecture links",
+    ),
+    "requiredTechStackPieces": (
+        "Next.js + TypeScript + Tailwind frontend",
+        "Python 3.12 + FastAPI orchestrator backend",
+        "Supabase Postgres + pgvector RAG and memory store",
+        "NVIDIA Nemotron reasoning, embedding, and reranking models",
+    ),
+}
+
+FALLBACK_SCOPE_WARNINGS: tuple[str, ...] = (
+    "No strong RAG evidence was retrieved; treat defaults as safe MVPilot assumptions.",
+    "Never expose frontend-submitted or backend-owned secrets in generated files.",
+)
 
 _STACK_CONFLICT_TERMS: dict[str, tuple[str, ...]] = {
     "frontend_framework": ("vue", "svelte", "angular", "nuxt", "remix", "vite"),
@@ -197,11 +236,21 @@ async def build_build_context_response(request: BuildContextRequest) -> BuildCon
     for category in _CATEGORY_FIELDS:
         if not response_items[category]:
             empty_categories.append(category)
+            response_items[category] = _fallback_items(category)
 
     scope_warnings: list[ScopeWarningItem] = [
         ScopeWarningItem(item=item.item, reason=item.reason, source=item.source)
         for item in categorized.get("scopeWarnings", [])
     ]
+    if not chunks:
+        scope_warnings.extend(
+            ScopeWarningItem(
+                item=item,
+                reason="Safe fallback because vector retrieval returned no evidence.",
+                source="mvpilot_default_build_context",
+            )
+            for item in FALLBACK_SCOPE_WARNINGS
+        )
 
     logger.info(
         "rag.get_build_context projectId=%s query=%r docTypes=%s chunks=%s reranked=%s emptyCategories=%s",
@@ -219,8 +268,9 @@ async def build_build_context_response(request: BuildContextRequest) -> BuildCon
         requiredRepositoryFormat=response_items["requiredRepositoryFormat"],
         requiredDemoFormat=response_items["requiredDemoFormat"],
         requiredTechStackPieces=response_items["requiredTechStackPieces"],
+        agentBoundaries=_build_agent_boundaries(chunks),
         resolvedTechStack=_resolve_tech_stack(
-            required_items=response_items["requiredTechStackPieces"],
+            required_items=categorized.get("requiredTechStackPieces", []),
             optional_params=request.optionalParams,
         ),
         scopeWarnings=scope_warnings,
@@ -243,9 +293,33 @@ def _build_search_query(request: BuildContextRequest) -> str:
             parts.append("source urls: " + ", ".join(params.sourceUrls))
         if params.repoPreference:
             parts.append(f"repository preference: {params.repoPreference}")
+        if params.repoName:
+            parts.append(f"repository name: {params.repoName}")
+        if params.repoUrl:
+            parts.append(f"repository url: {params.repoUrl}")
+        if params.visibility:
+            parts.append(f"visibility: {params.visibility}")
         if params.demoPreference:
             parts.append(f"demo preference: {params.demoPreference}")
+    if request.rulesUrl:
+        parts.append(f"rules url: {request.rulesUrl}")
+    if request.referenceUrls:
+        parts.append("reference urls: " + ", ".join(request.referenceUrls))
+    if request.contextNeeded:
+        parts.append("context needed: " + ", ".join(request.contextNeeded))
     return " ".join(part for part in parts if part).strip()
+
+
+def _fallback_items(category: BuildContextResponseCategory) -> list[BuildContextItem]:
+    return [
+        BuildContextItem(
+            item=item,
+            priority="high",
+            reason="Safe MVPilot fallback used because RAG did not return this category.",
+            source="mvpilot_default_build_context",
+        )
+        for item in FALLBACK_BUILD_ITEMS[category]
+    ]
 
 
 def _categorize_chunks(chunks: list[RagSearchResult]) -> dict[str, list[BuildContextItem]]:
@@ -328,6 +402,26 @@ def _build_evidence(chunks: list[RagSearchResult]) -> list[EvidenceItem]:
         )
         for chunk in chunks
     ]
+
+
+def _build_agent_boundaries(chunks: list[RagSearchResult]) -> dict[str, Any]:
+    boundaries = [
+        bullet
+        for chunk in chunks
+        if chunk.doc_type in {"agent_boundaries", "agent_architecture", "implementation_constraints", "scope_warning"}
+        for bullet in _extract_bullets(chunk.text)
+    ]
+    if not boundaries:
+        boundaries = [
+            "RAG provides grounded context and memory only; it does not decide the final project.",
+            "Orchestrator owns planning and sequencing before GitHub actions.",
+            "GitHub Agent owns repository mutations and must reject unsafe paths or secrets.",
+            "Frontend never sends GitHub or Supabase service-role tokens.",
+        ]
+    return {
+        "rules": _unique_strings(boundaries),
+        "source": "rag_evidence" if chunks else "mvpilot_default_build_context",
+    }
 
 
 def _resolve_tech_stack(

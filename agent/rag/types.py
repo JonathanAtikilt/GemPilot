@@ -16,7 +16,10 @@ DocType = Literal[
     "tech_stack",
     "scope_warning",
     "agent_architecture",
+    "agent_boundaries",
+    "security_constraints",
     "implementation_constraints",
+    "nvidia_model_usage",
     "unknown",
 ]
 
@@ -134,13 +137,19 @@ class BuildContextOptionalParams(BaseModel):
     features: list[str] = Field(default_factory=list)
     sourceUrls: list[str] = Field(default_factory=list)
     repoPreference: str | None = None
+    repoName: str | None = None
+    repoUrl: str | None = None
+    visibility: str | None = None
     demoPreference: str | None = None
 
 
 class BuildContextRequest(BaseModel):
     projectId: str = Field(min_length=1)
     idea: str = Field(min_length=1)
+    rulesUrl: str | None = None
+    referenceUrls: list[str] = Field(default_factory=list)
     optionalParams: BuildContextOptionalParams | None = None
+    contextNeeded: list[str] = Field(default_factory=list)
     topK: int = Field(default=8, ge=1, le=25)
 
 
@@ -179,6 +188,7 @@ class BuildContextResponse(BaseModel):
     requiredRepositoryFormat: list[BuildContextItem]
     requiredDemoFormat: list[BuildContextItem]
     requiredTechStackPieces: list[BuildContextItem]
+    agentBoundaries: dict[str, Any] = Field(default_factory=dict)
     resolvedTechStack: ResolvedTechStack
     scopeWarnings: list[ScopeWarningItem]
     evidence: list[EvidenceItem]

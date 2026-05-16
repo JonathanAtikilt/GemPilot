@@ -8,7 +8,10 @@ from tools.policy import validate_generated_repo_name
 from tools.schemas import RepoHealthResult, ToolResult
 
 
-REQUIRED_FILES = ["README.md", "logs/build_log.md", "demo/demo_script.md"]
+README_FILES = ["README.md"]
+BUILD_LOG_FILES = ["docs/BUILD_LOG.md", "logs/build_log.md"]
+DEMO_SCRIPT_FILES = ["demo/demo_script.md", "demo_script.md"]
+ARCHITECTURE_FILES = ["docs/ARCHITECTURE.md"]
 PACKAGE_FILES = ["package.json", "requirements.txt"]
 SOURCE_PREFIXES = ["src/", "backend/"]
 
@@ -20,8 +23,9 @@ def _has_any_file_with_prefix(files: set[str], prefixes: list[str]) -> bool:
 def _health_result(repo_name: str, files: set[str], commit_count: int) -> dict:
     checks = {
         "README.md exists": "README.md" in files,
-        "logs/build_log.md exists": "logs/build_log.md" in files,
-        "demo/demo_script.md exists": "demo/demo_script.md" in files,
+        "build log exists": any(path in files for path in BUILD_LOG_FILES),
+        "architecture doc exists": any(path in files for path in ARCHITECTURE_FILES),
+        "demo script exists": any(path in files for path in DEMO_SCRIPT_FILES),
         "package.json or requirements.txt exists": any(path in files for path in PACKAGE_FILES),
         "src/ or backend/ exists": _has_any_file_with_prefix(files, SOURCE_PREFIXES),
         "at least one commit exists": commit_count > 0,
@@ -39,12 +43,14 @@ def check_repo_health(
     repo_name: str,
     *,
     config: GitHubConfig | None = None,
+    allow_existing_repo: bool = False,
 ) -> dict:
     """Check whether a generated repo has the minimum demo artifacts."""
 
-    repo_error = validate_generated_repo_name(repo_name)
-    if repo_error:
-        return repo_error.model_dump(mode="json")
+    if not allow_existing_repo:
+        repo_error = validate_generated_repo_name(repo_name)
+        if repo_error:
+            return repo_error.model_dump(mode="json")
 
     active_config = config or GitHubConfig.from_env()
     if active_config.mock_tools or not active_config.token:
@@ -64,7 +70,7 @@ def check_repo_health(
     errors: list[str] = []
     try:
         client.get_repo(repo_name)
-        for path in REQUIRED_FILES + PACKAGE_FILES:
+        for path in README_FILES + BUILD_LOG_FILES + DEMO_SCRIPT_FILES + ARCHITECTURE_FILES + PACKAGE_FILES:
             try:
                 client.get_contents(repo_name, path)
                 files.add(path)

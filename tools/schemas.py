@@ -37,6 +37,8 @@ class FilePayload(BaseModel):
             raise ValueError("file path must not contain '..'")
         if any(part.startswith(".git") for part in parts):
             raise ValueError("file path must not modify git internals")
+        if parts[-1] == ".env":
+            raise ValueError(".env files must never be committed")
 
         return "/".join(parts)
 

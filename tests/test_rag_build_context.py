@@ -113,12 +113,17 @@ async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeyp
         BuildContextRequest(projectId="p1", idea="AI teammate", topK=8)
     )
 
-    assert response.requiredDeliverables == []
-    assert response.allowedToolsAndAPIs == []
-    assert response.requiredRepositoryFormat == []
-    assert response.requiredDemoFormat == []
-    assert response.requiredTechStackPieces == []
-    assert response.scopeWarnings == []
+    assert len(response.requiredDeliverables) == 2
+    assert all(
+        item.source == "mvpilot_default_build_context"
+        for item in response.requiredDeliverables
+    )
+    assert len(response.allowedToolsAndAPIs) == 3
+    assert len(response.requiredRepositoryFormat) == 3
+    assert len(response.requiredDemoFormat) == 3
+    assert len(response.requiredTechStackPieces) == 4
+    assert len(response.scopeWarnings) == 2
+    assert response.scopeWarnings[0].source == "mvpilot_default_build_context"
     assert response.evidence == []
     assert response.resolvedTechStack.source == "default"
     assert response.resolvedTechStack.requiredItems == []

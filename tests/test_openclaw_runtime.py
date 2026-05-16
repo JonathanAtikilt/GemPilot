@@ -7,7 +7,8 @@ from agent.openclaw_runtime import (
 )
 
 
-def test_openclaw_status_requires_api_key() -> None:
+def test_openclaw_status_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("OPENCLAW_API_KEY", raising=False)
     missing = openclaw_runtime_status(Settings(_env_file=None))
     configured = openclaw_runtime_status(
         Settings(_env_file=None, openclaw_api_key="fake-openclaw-key")

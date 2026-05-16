@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import uuid4
 
+import certifi
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -58,6 +59,7 @@ class GitHubConnectionStore(Protocol):
     def get_connection(self, connection_id: str) -> GitHubConnectionRecord: ...
     def get_by_state_hash(self, state_hash: str) -> GitHubConnectionRecord: ...
     def update(self, record: GitHubConnectionRecord) -> GitHubConnectionRecord: ...
+    def delete(self, connection_id: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,11 @@ class InMemoryGitHubConnectionStore:
             raise GitHubOAuthError("GitHub connection was not found.")
         self._connections = {**self._connections, record.id: record}
         return record
+
+    def delete(self, connection_id: str) -> None:
+        self._connections = {
+            key: value for key, value in self._connections.items() if key != connection_id
+        }
 
 
 class SupabaseGitHubConnectionStore:
@@ -149,6 +156,15 @@ class SupabaseGitHubConnectionStore:
         )
         self._raise_for_supabase_error(response, "update GitHub connection")
         return record
+
+    def delete(self, connection_id: str) -> None:
+        response = (
+            self._client.table("github_connections")
+            .delete()
+            .eq("id", connection_id)
+            .execute()
+        )
+        self._raise_for_supabase_error(response, "delete GitHub connection")
 
     @staticmethod
     def _raise_for_supabase_error(response: object, action: str) -> None:
@@ -223,7 +239,6 @@ class GitHubConnectionService:
         *,
         task_id: str,
     ) -> GitHubWorkflowAuth:
-        self._require_oauth_configured()
         record = self._store.get_connection(connection_id)
         if record.status == "exchanged" and record.encrypted_access_token and record.github_login:
             token = self.decrypt_access_token(record)
@@ -233,6 +248,8 @@ class GitHubConnectionService:
                 scopes=list(record.scopes),
                 config=_github_config(token, record.github_login),
             )
+
+        self._require_oauth_configured()
 
         if record.status != "ready" or not record.encrypted_pending_code:
             self._mark_failed(record, "GitHub connection is not ready for token exchange.")
@@ -298,6 +315,103 @@ class GitHubConnectionService:
             },
         )
 
+    def redirect_url_for_error(self, return_to: str | None, message: str) -> str:
+        safe_return_to = self._safe_return_to(return_to)
+        return _append_query(
+            safe_return_to,
+            {
+                "github_status": "error",
+                "github_error": message[:200],
+            },
+        )
+
+    def create_env_token_connection(self, return_to: str | None) -> GitHubConnectionRecord:
+        """Dev fallback when OAuth app vars are missing but GITHUB_TOKEN is configured."""
+        if not self._settings.github_pat_configured:
+            raise GitHubOAuthError(
+                "Backend GitHub token is not configured. Set GITHUB_TOKEN and GITHUB_OWNER."
+            )
+        self._require_encryption_key()
+        token = self._settings.github_personal_access_token
+        owner = (self._settings.github_owner or "").strip()
+        connection_id = str(uuid4())
+        now = datetime.now(UTC)
+        record = GitHubConnectionRecord(
+            id=connection_id,
+            task_id=None,
+            state_hash=_hash_state(f"env-token:{connection_id}"),
+            encrypted_pending_code=None,
+            encrypted_access_token=self._encrypt(token.get_secret_value() if token else ""),
+            scopes=["repo", "read:user", "user:email"],
+            github_login=owner,
+            github_user_id=None,
+            status="exchanged",
+            return_to=self._validate_return_to(return_to),
+            error_summary=None,
+            created_at=now,
+            updated_at=now,
+            exchanged_at=now,
+        )
+        return self._store.create(record)
+
+    def oauth_public_config(self) -> dict[str, object]:
+        return {
+            "oauthConfigured": self._settings.github_oauth_configured,
+            "patConfigured": self._settings.github_pat_configured,
+            "patTokenType": self._settings.github_pat_token_type,
+            "canCreateRepositories": self._settings.github_pat_can_create_repositories,
+            "recommendedRepoPreference": (
+                "use_existing_repo"
+                if self._settings.github_pat_token_type == "fine_grained"
+                else "create_new_repo"
+            ),
+            "redirectUri": self._settings.github_oauth_redirect_uri,
+            "missingEnv": self._missing_oauth_env(),
+        }
+
+    def _missing_oauth_env(self) -> list[str]:
+        missing: list[str] = []
+        if not (self._settings.github_oauth_client_id or "").strip():
+            missing.append("GITHUB_OAUTH_CLIENT_ID")
+        if not Settings._secret_has_value(self._settings.github_oauth_client_secret):
+            missing.append("GITHUB_OAUTH_CLIENT_SECRET")
+        if not Settings._secret_has_value(self._settings.github_token_encryption_key):
+            missing.append("GITHUB_TOKEN_ENCRYPTION_KEY")
+        return missing
+
+    def _safe_return_to(self, return_to: str | None) -> str:
+        try:
+            return self._validate_return_to(return_to)
+        except GitHubOAuthError:
+            return self._settings.frontend_base_url
+
+    def _require_encryption_key(self) -> None:
+        if not Settings._secret_has_value(self._settings.github_token_encryption_key):
+            raise GitHubOAuthError(
+                "GITHUB_TOKEN_ENCRYPTION_KEY is required to store GitHub credentials."
+            )
+
+    def connection_status(self, connection_id: str | None) -> dict[str, object]:
+        if not connection_id:
+            return {"connected": False, "githubConnectionId": None, "username": None}
+        try:
+            record = self._store.get_connection(connection_id)
+        except GitHubOAuthError:
+            return {"connected": False, "githubConnectionId": connection_id, "username": None}
+        connected = record.status in {"ready", "exchanged"}
+        return {
+            "connected": connected,
+            "githubConnectionId": record.id,
+            "username": record.github_login,
+            "status": record.status,
+            "scopes": record.scopes if connected else [],
+        }
+
+    def disconnect(self, connection_id: str | None) -> dict[str, object]:
+        if connection_id:
+            self._store.delete(connection_id)
+        return {"connected": False, "githubConnectionId": None, "username": None}
+
     def _authorization_url(self, state: str) -> str:
         client_id = self._settings.github_oauth_client_id or ""
         redirect_uri = self._settings.github_oauth_redirect_uri or ""
@@ -310,7 +424,7 @@ class GitHubConnectionService:
 
     async def _exchange_code(self, code: str) -> dict[str, object]:
         secret = self._settings.github_oauth_client_secret
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, verify=certifi.where()) as client:
             response = await client.post(
                 GITHUB_TOKEN_URL,
                 headers={"Accept": "application/json"},
@@ -329,7 +443,7 @@ class GitHubConnectionService:
         return payload
 
     async def _fetch_user(self, token: str) -> dict[str, object]:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, verify=certifi.where()) as client:
             response = await client.get(
                 GITHUB_USER_URL,
                 headers={
@@ -366,7 +480,11 @@ class GitHubConnectionService:
 
     def _require_oauth_configured(self) -> None:
         if not self._settings.github_oauth_configured:
-            raise GitHubOAuthError("GitHub OAuth is not configured.")
+            missing = ", ".join(self._missing_oauth_env()) or "GitHub OAuth env vars"
+            raise GitHubOAuthError(
+                f"GitHub OAuth is not configured. Set {missing} and register "
+                f"{self._settings.github_oauth_redirect_uri} in your GitHub OAuth app."
+            )
 
     def _fernet_cipher(self) -> Fernet:
         if self._fernet is not None:

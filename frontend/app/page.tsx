@@ -4,12 +4,80 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 type StepStatus = "Ready" | "Running" | "Pending" | "Complete" | "Failed";
 type AdditionalSourceType = "url" | "file";
+type RepoPreference = "create_new_repo" | "use_existing_repo";
+type RepoVisibility = "private" | "public";
+type FlightStageKey = "preflight" | "radar_scan" | "flight_plan" | "autopilot" | "black_box" | "landed";
 
 type AgentStep = {
+  key: FlightStageKey;
   phase: string;
   title: string;
   detail: string;
   status: StepStatus;
+};
+
+type WorkflowStep = {
+  node_name: string;
+  status: string;
+  message: string;
+  flight_stage?: string | null;
+  agent?: string | null;
+};
+
+type RagEvidence = {
+  source: string;
+  docType?: string;
+  doc_type?: string;
+  chunkId?: string;
+  chunk_id?: string;
+  content?: string;
+  text?: string;
+  score?: number;
+};
+
+type ToolCall = {
+  tool?: string;
+  status?: string;
+  summary?: string;
+  commit_url?: string | null;
+  repo?: unknown;
+  files?: unknown;
+};
+
+type GeneratedArtifact = {
+  name: string;
+  kind?: string;
+  summary?: string;
+  content?: string;
+};
+
+type TaskDetail = {
+  task: {
+    id: string;
+    status: string;
+    repo_visibility: RepoVisibility;
+  };
+  agent_steps: WorkflowStep[];
+  build_context?: {
+    evidence?: RagEvidence[];
+    requiredDeliverables?: unknown[];
+    scopeWarnings?: unknown[];
+  };
+  tool_calls?: ToolCall[];
+  generated_artifacts?: GeneratedArtifact[];
+  final_report?: {
+    status?: string;
+    summary?: string;
+    repo?: { url?: string | null; name?: string | null } | null;
+    links?: {
+      repoUrl?: string | null;
+      commitUrl?: string | null;
+      branch?: string | null;
+      buildLogPath?: string | null;
+      architectureDocPath?: string | null;
+      demoScriptPath?: string | null;
+    };
+  } | null;
 };
 
 type AdditionalSource =
@@ -20,12 +88,12 @@ const defaultTitle = "Healthcare Referral Coordinator";
 const defaultIdea = "Build a healthcare referral coordination agent that helps clinics prevent failed referrals.";
 
 const flightStops: AgentStep[] = [
-  { phase: "PREFLIGHT", title: "Capture brief", detail: "Package the title, idea, GitHub connection, rules URL, and extra source material.", status: "Ready" },
-  { phase: "RAG SCAN", title: "Retrieve rules", detail: "Index hackathon rules, NVIDIA docs, uploaded files, and additional URLs.", status: "Pending" },
-  { phase: "SCOPE", title: "Plan MVP", detail: "Nemotron narrows the broad idea into a realistic hackathon build.", status: "Pending" },
-  { phase: "SYNTH", title: "Generate repo", detail: "OpenClaw coordinates repo creation, code generation, commits, and build logs.", status: "Pending" },
-  { phase: "QA", title: "Verify build", detail: "The agent detects blockers, verifies outputs, and records fixes.", status: "Pending" },
-  { phase: "LANDING", title: "Deliver MVP", detail: "Final README, demo script, pitch, and GitHub repo are ready for review.", status: "Pending" },
+  { key: "preflight", phase: "PREFLIGHT", title: "Preflight Check", detail: "Package the idea, repo preference, GitHub connection, rules URL, and extra source material.", status: "Ready" },
+  { key: "radar_scan", phase: "RADAR", title: "Radar Scan", detail: "Retrieve hackathon rules, NVIDIA docs, uploaded files, logs, and RAG evidence.", status: "Pending" },
+  { key: "flight_plan", phase: "PLAN", title: "Flight Plan", detail: "Nemotron uses RAG build context to generate the implementation plan.", status: "Pending" },
+  { key: "autopilot", phase: "AUTOPILOT", title: "Autopilot Engaged", detail: "GitHub Agent creates or updates the repo, commits files, and verifies outputs.", status: "Pending" },
+  { key: "black_box", phase: "BLACK BOX", title: "Black Box Recorder", detail: "Store logs, decisions, artifacts, errors, and final memory.", status: "Pending" },
+  { key: "landed", phase: "LANDED", title: "MVP Landed", detail: "Final repo, commit, build log, and architecture links are ready.", status: "Pending" },
 ];
 
 const sourceTypes = [
@@ -34,19 +102,67 @@ const sourceTypes = [
   "Optional uploaded README, PDF, TXT, or Markdown files",
 ];
 
-function readGithubConnectionId() {
-  if (typeof window === "undefined") return null;
+type GithubOAuthConfig = {
+  oauthConfigured: boolean;
+  patConfigured: boolean;
+  patTokenType?: string | null;
+  canCreateRepositories?: boolean;
+  recommendedRepoPreference?: RepoPreference;
+  redirectUri?: string;
+  missingEnv?: string[];
+};
+
+function readGithubCallbackState(): {
+  connectionId: string | null;
+  error: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { connectionId: null, error: null };
+  }
 
   const params = new URLSearchParams(window.location.search);
   const connectionId = params.get("github_connection_id");
   const status = params.get("github_status");
+  const error = params.get("github_error");
+
+  if (status === "error") {
+    return { connectionId: null, error: error || "GitHub connection failed." };
+  }
 
   if (connectionId && status === "ready") {
     window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
-    return connectionId;
+    return { connectionId, error: null };
   }
 
-  return window.sessionStorage.getItem("mvpilot_github_connection_id");
+  const stored = window.sessionStorage.getItem("mvpilot_github_connection_id");
+  return { connectionId: stored, error: null };
+}
+
+function githubReturnTo() {
+  if (typeof window === "undefined") return "http://localhost:3000";
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function formatWorkflowError(message: string): string {
+  if (message.includes("Resource not accessible by personal access token")) {
+    return [
+      "GitHub rejected repo creation: this token cannot create new repositories.",
+      "Your GITHUB_TOKEN looks like a fine-grained PAT (github_pat_…). Those cannot call POST /user/repos.",
+      "Use “Use existing repo” and paste a repo URL you own, with Contents read/write on that repo.",
+      "Or replace GITHUB_TOKEN with a classic PAT (ghp_…) that has the repo scope, then restart the backend and Use backend token again.",
+    ].join(" ");
+  }
+  if (message.includes("already exists") || message.includes("name already exists")) {
+    return `${message} Pick a different repo name and launch again.`;
+  }
+  if (message.includes("Git Repository is empty") || message.includes("repository is empty")) {
+    return [
+      "The existing GitHub repo has no commits yet.",
+      "MVPilot will now seed an initial commit automatically — click New launch and try again.",
+      "Or add any file (e.g. README) on github.com first, then relaunch.",
+    ].join(" ");
+  }
+  return message;
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -76,30 +192,144 @@ function PlaneMarker({ progress }: { progress: number }) {
   );
 }
 
+function deriveFlightStageState(taskDetail: TaskDetail | null, hasLaunched: boolean, hasError: boolean) {
+  const completedStages = new Set<string>();
+  let failedStage: string | null = null;
+
+  for (const step of taskDetail?.agent_steps ?? []) {
+    const stage = step.flight_stage;
+    if (!stage) continue;
+    if (step.status === "failed" || stage === "failed") {
+      failedStage = stage === "failed" ? failedStage : stage;
+      continue;
+    }
+    if (["completed", "success", "blocked"].includes(step.status)) {
+      completedStages.add(stage);
+    }
+  }
+
+  const firstIncompleteIndex = flightStops.findIndex((stop) => !completedStages.has(stop.key));
+  const activeStopIndex = hasError
+    ? Math.max(0, flightStops.findIndex((stop) => stop.key === failedStage))
+    : firstIncompleteIndex === -1
+      ? flightStops.length - 1
+      : Math.max(0, firstIncompleteIndex);
+
+  const steps = flightStops.map((step, index) => {
+    if (hasError && (step.key === failedStage || index === activeStopIndex)) return { ...step, status: "Failed" as StepStatus };
+    if (!hasLaunched && index === 0) return { ...step, status: "Ready" as StepStatus };
+    if (completedStages.has(step.key)) return { ...step, status: "Complete" as StepStatus };
+    if (hasLaunched && index === activeStopIndex) return { ...step, status: "Running" as StepStatus };
+    return { ...step, status: "Pending" as StepStatus };
+  });
+
+  const completeCount = steps.filter((step) => step.status === "Complete").length;
+  const progressPercent = Math.min(100, Math.round((completeCount / (flightStops.length - 1)) * 100));
+  return { activeStopIndex, progressPercent: hasLaunched ? Math.max(progressPercent, 8) : 0, steps };
+}
+
 export default function Home() {
   const [projectTitle, setProjectTitle] = useState(defaultTitle);
   const [idea, setIdea] = useState(defaultIdea);
   const [primaryRulesUrl, setPrimaryRulesUrl] = useState("https://developer.nvidia.com/");
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
+  const [repoPreference, setRepoPreference] = useState<RepoPreference>("create_new_repo");
+  const [requestedRepoName, setRequestedRepoName] = useState("mvpilot-generated-demo");
+  const [existingRepoUrl, setExistingRepoUrl] = useState("");
+  const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
+  const [githubOAuthConfig, setGithubOAuthConfig] = useState<GithubOAuthConfig | null>(null);
   const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create or update the project repo through the backend.");
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [repoUrl, setRepoUrl] = useState<string | null>(null);
+  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "sent" | "mocked" | "error">("idle");
   const [message, setMessage] = useState("Ready for preflight. Add the build brief and launch MVPilot.");
 
   useEffect(() => {
-    Promise.resolve().then(() => {
-      const connectionId = readGithubConnectionId();
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+    const { connectionId, error } = readGithubCallbackState();
 
-      if (connectionId) {
-        setGithubConnectionId(connectionId);
-        setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    });
+    if (error) {
+      setGithubMessage(error);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (connectionId) {
+      setGithubConnectionId(connectionId);
+      setGithubMessage("GitHub connection ready. The backend will exchange it when the run starts.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    const storedTaskId = window.sessionStorage.getItem("mvpilot_task_id");
+    if (storedTaskId) {
+      setTaskId(storedTaskId);
+      setSubmitState("sent");
+      setMessage("Resuming flight telemetry for your in-progress run…");
+    }
+
+    if (!apiBaseUrl) return;
+
+    fetch(`${apiBaseUrl}/api/auth/github/config`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config) => {
+        if (!config) return;
+        const typed = config as GithubOAuthConfig;
+        setGithubOAuthConfig(typed);
+        if (typed.recommendedRepoPreference === "use_existing_repo") {
+          setRepoPreference("use_existing_repo");
+        }
+        if (!connectionId && !error && typed.patConfigured && !typed.oauthConfigured) {
+          setGithubMessage(
+            typed.canCreateRepositories === false
+              ? "Fine-grained PAT detected: use “Use existing repo” (create new repo needs a classic ghp_ token with repo scope)."
+              : "GitHub OAuth app is not configured on the backend. Use “Use backend token” or set GITHUB_OAUTH_* in .env.",
+          );
+        }
+      })
+      .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!taskId || !process.env.NEXT_PUBLIC_AGENT_API_URL || submitState === "idle") {
+      return;
+    }
+
+    let cancelled = false;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+
+    async function pollTask() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/agent/tasks/${taskId}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const detail = await response.json() as TaskDetail;
+        if (cancelled) return;
+        setTaskDetail(detail);
+        const status = detail.task.status;
+        if (status === "completed") {
+          setSubmitState("sent");
+          setMessage("MVP landed. Review the evidence, build log, and GitHub links below.");
+          return;
+        }
+        if (status === "failed") {
+          setSubmitState("error");
+          const failedStep = detail.agent_steps.find((step) => step.status === "failed");
+          const rawMessage =
+            failedStep?.message
+            || detail.final_report?.summary
+            || "Workflow failed. Check the failed flight-stage event below.";
+          setMessage(formatWorkflowError(rawMessage));
+          return;
+        }
+      } catch {
+        if (!cancelled) setMessage("Waiting for task telemetry from the orchestrator...");
+      }
+      if (!cancelled) window.setTimeout(pollTask, 1500);
+    }
+
+    pollTask();
+    return () => {
+      cancelled = true;
+    };
+  }, [submitState, taskId]);
 
   const payloadPreview = useMemo(
     () => ({
@@ -107,8 +337,8 @@ export default function Home() {
       idea,
       github_connected: Boolean(githubConnectionId),
       github_connection_id: githubConnectionId,
-      primary_rules_url: primaryRulesUrl.trim() || null,
-      additional_urls: additionalSources
+      rulesUrl: primaryRulesUrl.trim() || null,
+      referenceUrls: additionalSources
         .filter((source): source is Extract<AdditionalSource, { type: "url" }> => source.type === "url")
         .map((source) => source.value.trim())
         .filter(Boolean),
@@ -119,25 +349,30 @@ export default function Home() {
           type: source.file?.type || "unknown",
           size: source.file?.size,
         })),
+      repoPreference,
+      repoName: repoPreference === "create_new_repo" ? requestedRepoName.trim() || null : null,
+      repoUrl: repoPreference === "use_existing_repo" ? existingRepoUrl.trim() || null : null,
+      visibility,
       source: "mvpilot_frontend",
     }),
-    [additionalSources, githubConnectionId, idea, primaryRulesUrl, projectTitle],
+    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectTitle, repoPreference, requestedRepoName, visibility],
   );
 
-  const hasLaunched = submitState !== "idle" && submitState !== "error";
-  const progressPercent = submitState === "sent" ? 58 : hasLaunched ? 34 : 0;
-  const activeStopIndex = submitState === "sent" ? 3 : hasLaunched ? 1 : 0;
-  const completedStops = submitState === "sent" ? 3 : hasLaunched ? 1 : 0;
-  const additionalUrlCount = payloadPreview.additional_urls.length;
+  const hasLaunched = Boolean(taskId);
+  const runFailed = submitState === "error";
+  const stageState = deriveFlightStageState(taskDetail, hasLaunched, runFailed);
+  const progressPercent = stageState.progressPercent;
+  const activeStopIndex = stageState.activeStopIndex;
+  const steps = stageState.steps;
+  const repoUrl = taskDetail?.final_report?.links?.repoUrl || taskDetail?.final_report?.repo?.url || null;
+  const commitUrl = taskDetail?.final_report?.links?.commitUrl || null;
+  const buildLogPath = taskDetail?.final_report?.links?.buildLogPath || "docs/BUILD_LOG.md";
+  const architectureDocPath = taskDetail?.final_report?.links?.architectureDocPath || "docs/ARCHITECTURE.md";
+  const ragEvidence = taskDetail?.build_context?.evidence ?? [];
+  const toolCalls = taskDetail?.tool_calls ?? [];
+  const buildLogArtifact = taskDetail?.generated_artifacts?.find((artifact) => artifact.name === "docs/BUILD_LOG.md");
+  const additionalUrlCount = payloadPreview.referenceUrls.length;
   const additionalFileCount = payloadPreview.additional_files.length;
-
-  const steps = flightStops.map((step, index) => {
-    if (submitState === "error" && index === 0) return { ...step, status: "Failed" as StepStatus };
-    if (!hasLaunched && index === 0) return { ...step, status: "Ready" as StepStatus };
-    if (index < completedStops) return { ...step, status: "Complete" as StepStatus };
-    if (index === activeStopIndex) return { ...step, status: "Running" as StepStatus };
-    return { ...step, status: "Pending" as StepStatus };
-  });
 
   function connectGitHub() {
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
@@ -147,17 +382,77 @@ export default function Home() {
       return;
     }
 
+    if (githubOAuthConfig && !githubOAuthConfig.oauthConfigured) {
+      setGithubMessage(
+        `GitHub OAuth is not configured. Set ${(githubOAuthConfig.missingEnv || ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_TOKEN_ENCRYPTION_KEY"]).join(", ")} in the backend .env, then register ${githubOAuthConfig.redirectUri || "the callback URL"} in your GitHub OAuth app.`,
+      );
+      return;
+    }
+
     const params = new URLSearchParams({
-      return_to: window.location.origin,
+      return_to: githubReturnTo(),
     });
 
-    window.location.href = `${apiBaseUrl}/github/connect?${params.toString()}`;
+    window.location.href = `${apiBaseUrl}/api/auth/github/login?${params.toString()}`;
   }
 
-  function disconnectGitHub() {
+  async function connectGitHubWithEnvToken() {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+    if (!apiBaseUrl) {
+      setGithubMessage("Missing NEXT_PUBLIC_AGENT_API_URL.");
+      return;
+    }
+
+    const params = new URLSearchParams({ return_to: githubReturnTo() });
+    const response = await fetch(`${apiBaseUrl}/api/auth/github/use-env-token?${params.toString()}`, {
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setGithubMessage(typeof payload.detail === "string" ? payload.detail : "Backend GitHub token connection failed.");
+      return;
+    }
+
+    const connectionId = typeof payload.githubConnectionId === "string" ? payload.githubConnectionId : null;
+    if (!connectionId) {
+      setGithubMessage("Backend did not return a GitHub connection id.");
+      return;
+    }
+
+    window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
+    setGithubConnectionId(connectionId);
+    setGithubMessage(
+      payload.username ? `Using backend GITHUB_TOKEN as ${payload.username}.` : "Using backend GITHUB_TOKEN for this session.",
+    );
+  }
+
+  function resetFlight() {
+    setTaskId(null);
+    setTaskDetail(null);
+    setSubmitState("idle");
+    setMessage("Ready for preflight. Add the build brief and launch MVPilot.");
+    window.sessionStorage.removeItem("mvpilot_task_id");
+  }
+
+  async function disconnectGitHub() {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
+    if (apiBaseUrl && githubConnectionId) {
+      await fetch(`${apiBaseUrl}/api/auth/github/disconnect?github_connection_id=${encodeURIComponent(githubConnectionId)}`, {
+        method: "POST",
+      }).catch(() => undefined);
+    }
     setGithubConnectionId(null);
     window.sessionStorage.removeItem("mvpilot_github_connection_id");
     setGithubMessage("GitHub disconnected for this browser session.");
+  }
+
+  async function checkGithubStatus(apiBaseUrl: string) {
+    if (!githubConnectionId) return { connected: false, username: null };
+    const response = await fetch(`${apiBaseUrl}/api/auth/github/status?github_connection_id=${encodeURIComponent(githubConnectionId)}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) return { connected: false, username: null };
+    return await response.json() as { connected: boolean; username?: string | null };
   }
 
   function addSource() {
@@ -201,6 +496,18 @@ export default function Home() {
       return;
     }
 
+    if (repoPreference === "create_new_repo" && !requestedRepoName.trim()) {
+      setSubmitState("error");
+      setMessage("Add a repo name or choose an existing repository before launch.");
+      return;
+    }
+
+    if (repoPreference === "use_existing_repo" && !existingRepoUrl.trim()) {
+      setSubmitState("error");
+      setMessage("Add the existing GitHub repo URL before launch.");
+      return;
+    }
+
     setSubmitState("sending");
     setMessage("Flight plan filed. Sending the build brief to Person 1's orchestrator...");
 
@@ -214,10 +521,23 @@ export default function Home() {
       return;
     }
 
+    const githubStatus = await checkGithubStatus(apiBaseUrl);
+    if (!githubStatus.connected) {
+      setSubmitState("error");
+      setGithubMessage("GitHub is not connected. Complete backend OAuth before launching repo actions.");
+      setMessage("Connect GitHub before launch so the backend can create or update the repo without frontend tokens.");
+      return;
+    }
+    setGithubMessage(githubStatus.username ? `Connected as ${githubStatus.username}.` : "GitHub connection ready.");
+
     const formData = new FormData();
     formData.append("title", payloadPreview.title);
     formData.append("idea", idea);
-    formData.append("primary_rules_url", primaryRulesUrl.trim());
+    formData.append("rulesUrl", primaryRulesUrl.trim());
+    formData.append("repoPreference", repoPreference);
+    formData.append("visibility", visibility);
+    if (repoPreference === "create_new_repo") formData.append("repoName", requestedRepoName.trim());
+    if (repoPreference === "use_existing_repo") formData.append("repoUrl", existingRepoUrl.trim());
     formData.append("source", "mvpilot_frontend");
 
     if (githubConnectionId) {
@@ -227,7 +547,7 @@ export default function Home() {
 
     additionalSources.forEach((source) => {
       if (source.type === "url" && source.value.trim()) {
-        formData.append("additional_urls", source.value.trim());
+        formData.append("referenceUrls", source.value.trim());
       }
 
       if (source.type === "file" && source.file) {
@@ -236,7 +556,7 @@ export default function Home() {
     });
 
     try {
-      const response = await fetch(`${apiBaseUrl}/agent/run`, {
+      const response = await fetch(`${apiBaseUrl}/api/orchestrator/start-project`, {
         method: "POST",
         body: formData,
       });
@@ -246,10 +566,11 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setTaskId(data.task_id ?? data.id ?? "sent-without-task-id");
-      setRepoUrl(data.repo_url ?? data.github_repo_url ?? null);
+      const launchedTaskId = data.task_id ?? data.id ?? "sent-without-task-id";
+      setTaskId(launchedTaskId);
+      window.sessionStorage.setItem("mvpilot_task_id", launchedTaskId);
       setSubmitState("sent");
-      setMessage("MVPilot is airborne. Next step: subscribe to task updates or poll GET /agent/tasks/{task_id}.");
+      setMessage("MVPilot is airborne. Polling live flight telemetry from the orchestrator.");
     } catch (error) {
       setSubmitState("error");
       setMessage(error instanceof Error ? error.message : "Could not reach the agent endpoint.");
@@ -312,13 +633,50 @@ export default function Home() {
                       {githubConnectionId ? (
                         <button type="button" onClick={disconnectGitHub} className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10">Disconnect</button>
                       ) : (
-                        <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect</button>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={connectGitHub} className="rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_15px_rgba(0,242,255,0.28)]">Connect OAuth</button>
+                          {githubOAuthConfig?.patConfigured ? (
+                            <button type="button" onClick={() => void connectGitHubWithEnvToken()} className="rounded border border-[#4edea3]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#4edea3] transition hover:bg-[#4edea3]/10">Use backend token</button>
+                          ) : null}
+                        </div>
                       )}
                     </div>
                     <div className="mt-3 flex items-start justify-between gap-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">
                       <p className="text-sm leading-6 text-[#b9cacb]">{githubMessage}</p>
                       <StatusPill status={githubConnectionId ? "Complete" : "Ready"} />
                     </div>
+                  </section>
+
+                  <section className="mt-5 rounded-lg border border-[#3a494b]/70 bg-[#1c1f29]/70 p-3">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">Repository</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Action</span>
+                        <select value={repoPreference} onChange={(event) => setRepoPreference(event.target.value as RepoPreference)} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#dfe2ef] outline-none focus:border-[#00f2ff]">
+                          <option value="create_new_repo">Create new repo</option>
+                          <option value="use_existing_repo">Use existing repo</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Visibility</span>
+                        <select value={visibility} onChange={(event) => setVisibility(event.target.value as RepoVisibility)} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#dfe2ef] outline-none focus:border-[#00f2ff]">
+                          <option value="private">Private</option>
+                          <option value="public">Public</option>
+                        </select>
+                      </label>
+                    </div>
+                    {repoPreference === "create_new_repo" ? (
+                      <label className="mt-3 block">
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Repo name</span>
+                        <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} placeholder="mvpilot-generated-your-idea" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                        <p className="mt-1 font-mono text-[10px] text-[#849495]">Must start with mvpilot-generated- (mvpilot-demo is auto-corrected).</p>
+                      </label>
+                    ) : (
+                      <label className="mt-3 block">
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Existing repo URL</span>
+                        <input type="url" value={existingRepoUrl} onChange={(event) => setExistingRepoUrl(event.target.value)} placeholder="https://github.com/user/repo" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                      </label>
+                    )}
                   </section>
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="primary-rules-url">Primary rules URL</label>
@@ -392,13 +750,26 @@ export default function Home() {
                 <div className="rounded-lg border border-[#00f2ff]/15 bg-[#0f131c]/85 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Autopilot Active</p>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">
+                        {runFailed ? "Flight aborted" : "Autopilot Active"}
+                      </p>
                       <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">{payloadPreview.title}</h2>
-                      <p className="mt-2 max-w-3xl font-mono text-xs leading-5 text-[#b9cacb]">{message}</p>
+                      <p className={`mt-2 max-w-3xl font-mono text-xs leading-5 ${runFailed ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{message}</p>
                     </div>
-                    <div className="text-left lg:text-right">
-                      <p className="font-mono text-4xl font-bold text-[#00f2ff]">{progressPercent}%</p>
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">Completion</p>
+                    <div className="flex flex-col items-start gap-3 lg:items-end">
+                      <div className="text-left lg:text-right">
+                        <p className="font-mono text-4xl font-bold text-[#00f2ff]">{progressPercent}%</p>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">Completion</p>
+                      </div>
+                      {runFailed ? (
+                        <button
+                          type="button"
+                          onClick={resetFlight}
+                          className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10"
+                        >
+                          New launch
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -410,8 +781,8 @@ export default function Home() {
                       <div className="grid grid-cols-6 gap-4">
                         {steps.map((step) => (
                           <div key={step.phase} className="relative flex flex-col items-center pt-3 text-center">
-                            <div className={`z-10 h-5 w-5 rounded-full border-4 border-[#0f131c] ${step.status === "Complete" ? "bg-[#4edea3] shadow-[0_0_12px_rgba(78,222,163,0.65)]" : step.status === "Running" ? "bg-[#00f2ff] shadow-[0_0_20px_rgba(0,242,255,0.7)]" : "bg-[#31353f]"}`} />
-                            <p className={`mt-4 font-mono text-[11px] font-bold uppercase tracking-widest ${step.status === "Running" ? "text-[#00f2ff]" : step.status === "Complete" ? "text-[#4edea3]" : "text-[#849495]"}`}>{step.phase}</p>
+                            <div className={`z-10 h-5 w-5 rounded-full border-4 border-[#0f131c] ${step.status === "Complete" ? "bg-[#4edea3] shadow-[0_0_12px_rgba(78,222,163,0.65)]" : step.status === "Running" ? "bg-[#00f2ff] shadow-[0_0_20px_rgba(0,242,255,0.7)]" : step.status === "Failed" ? "bg-[#ffb4ab] shadow-[0_0_16px_rgba(255,180,171,0.45)]" : "bg-[#31353f]"}`} />
+                            <p className={`mt-4 font-mono text-[11px] font-bold uppercase tracking-widest ${step.status === "Running" ? "text-[#00f2ff]" : step.status === "Complete" ? "text-[#4edea3]" : step.status === "Failed" ? "text-[#ffb4ab]" : "text-[#849495]"}`}>{step.phase}</p>
                             <p className="mt-1 text-xs leading-5 text-[#b9cacb]">{step.title}</p>
                           </div>
                         ))}
@@ -423,29 +794,59 @@ export default function Home() {
                 <div className="grid gap-5 lg:grid-cols-3">
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Radar Evidence</p>
-                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Source manifest</h3>
-                    <div className="mt-4 grid gap-2 font-mono text-xs text-[#b9cacb]">
-                      <p>Primary URL: {primaryRulesUrl}</p>
-                      <p>Extra URLs: {additionalUrlCount}</p>
-                      <p>Extra files: {additionalFileCount}</p>
-                      <p>GitHub: {githubConnectionId ? "CONNECTED" : "NOT CONNECTED"}</p>
+                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{ragEvidence.length ? `${ragEvidence.length} chunks retrieved` : "Waiting for context"}</h3>
+                    <div className="mt-4 grid max-h-56 gap-2 overflow-y-auto text-xs text-[#b9cacb]">
+                      {ragEvidence.slice(0, 4).map((evidence, index) => (
+                        <div key={`${evidence.source}-${index}`} className="rounded border border-[#3a494b] bg-[#0a0e17] p-3">
+                          <p className="font-mono font-bold uppercase tracking-widest text-[#4edea3]">{evidence.docType || evidence.doc_type || "source"} · {typeof evidence.score === "number" ? evidence.score.toFixed(2) : "n/a"}</p>
+                          <p className="mt-1 font-mono text-[#849495]">{evidence.source}</p>
+                          <p className="mt-2 line-clamp-3 leading-5">{evidence.content || evidence.text}</p>
+                        </div>
+                      ))}
+                      {!ragEvidence.length && (
+                        <div className="rounded border border-[#3a494b] bg-[#0a0e17] p-3 font-mono">
+                          <p>Primary URL: {primaryRulesUrl}</p>
+                          <p>Extra URLs: {additionalUrlCount}</p>
+                          <p>Extra files: {additionalFileCount}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Active Stop</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Tool Calls</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{steps[activeStopIndex].title}</h3>
                     <p className="mt-3 text-sm leading-6 text-[#b9cacb]">{steps[activeStopIndex].detail}</p>
+                    <div className="mt-4 grid max-h-48 gap-2 overflow-y-auto">
+                      {toolCalls.slice(-5).map((call, index) => (
+                        <div key={`${call.tool}-${index}`} className="rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-mono text-xs font-bold text-[#dfe2ef]">{call.tool || "tool"}</p>
+                            <StatusPill status={call.status === "success" ? "Complete" : call.status === "failed" ? "Failed" : "Running"} />
+                          </div>
+                          {call.summary && <p className="mt-2 text-xs leading-5 text-[#b9cacb]">{call.summary}</p>}
+                        </div>
+                      ))}
+                      {!toolCalls.length && <p className="rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 text-xs text-[#849495]">No tool calls reported yet.</p>}
+                    </div>
                   </div>
 
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Landing Zone</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{repoUrl ? "GitHub repo ready" : "GitHub repo pending"}</h3>
                     {repoUrl ? (
-                      <a href={repoUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-black uppercase tracking-widest text-[#00363a]">Open repo</a>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <a href={repoUrl} target="_blank" rel="noreferrer" className="inline-flex rounded bg-[#00f2ff] px-3 py-2 font-mono text-xs font-black uppercase tracking-widest text-[#00363a]">Open repo</a>
+                        {commitUrl && <a href={commitUrl} target="_blank" rel="noreferrer" className="inline-flex rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-black uppercase tracking-widest text-[#00f2ff]">Commit</a>}
+                      </div>
                     ) : (
                       <p className="mt-3 text-sm leading-6 text-[#b9cacb]">When Person 1 returns repo_url, this card links to the generated project, README, demo script, and pitch.</p>
                     )}
+                    <div className="mt-4 grid gap-2 font-mono text-xs text-[#b9cacb]">
+                      <p>Build log: {buildLogPath}</p>
+                      <p>Architecture: {architectureDocPath}</p>
+                      {buildLogArtifact?.summary && <p>{buildLogArtifact.summary}</p>}
+                    </div>
                     {taskId && <p className="mt-4 rounded border border-[#00f2ff]/20 bg-[#00f2ff]/10 px-3 py-2 font-mono text-xs font-bold text-[#00f2ff]">Task ID: {taskId}</p>}
                   </div>
                 </div>
@@ -473,10 +874,10 @@ export default function Home() {
 
           <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
             <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Person 1 Handoff</p>
-            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Payload unchanged</h2>
+            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Orchestrator contract</h2>
             <div className="mt-3 space-y-2 text-sm leading-6 text-[#b9cacb]">
-              <p>POST /agent/run receives title, idea, github_connection_id, primary_rules_url, additional_urls, additional_files, and source.</p>
-              <p>Backend returns task_id and can later return repo_url for the landing zone.</p>
+              <p>POST /api/orchestrator/start-project receives idea, rulesUrl, referenceUrls, repoPreference, repoName, repoUrl, and visibility.</p>
+              <p>Backend returns task_id, then GET /agent/tasks/:id streams RAG evidence, tool calls, build logs, and final GitHub links.</p>
             </div>
           </div>
         </section>

@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from tools.policy import repo_prefix, validate_github_mutation
+from tools.http_ssl import default_ssl_context
+from tools.policy import repo_prefix, validate_action, validate_file_payloads, validate_github_mutation
 from tools.schemas import CommitFilesRequest, CreateRepoRequest, ToolResult, safe_validation_errors
 from tools import mock_store
 
@@ -65,7 +66,7 @@ class GitHubClient:
         )
 
         try:
-            with urlopen(request, timeout=20) as response:
+            with urlopen(request, timeout=20, context=default_ssl_context()) as response:
                 response_body = response.read().decode("utf-8")
         except HTTPError as exc:
             safe_body = exc.read().decode("utf-8", errors="replace")[:500]
@@ -131,24 +132,45 @@ class GitHubClient:
     def create_tree(
         self,
         repo_name: str,
-        base_tree_sha: str,
         tree_elements: list[dict[str, Any]],
+        *,
+        base_tree_sha: str | None = None,
     ) -> dict[str, Any]:
         if not self.config.owner:
             raise RuntimeError("GITHUB_OWNER is required for live GitHub mode.")
+        payload: dict[str, Any] = {"tree": tree_elements}
+        if base_tree_sha:
+            payload["base_tree"] = base_tree_sha
         return self.request(
             "POST",
             f"/repos/{self.config.owner}/{repo_name}/git/trees",
-            {"base_tree": base_tree_sha, "tree": tree_elements},
+            payload,
         )
 
-    def create_commit(self, repo_name: str, message: str, tree_sha: str, parent_sha: str) -> dict[str, Any]:
+    def create_commit(
+        self,
+        repo_name: str,
+        message: str,
+        tree_sha: str,
+        *,
+        parent_sha: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.config.owner:
+            raise RuntimeError("GITHUB_OWNER is required for live GitHub mode.")
+        parents = [parent_sha] if parent_sha else []
+        return self.request(
+            "POST",
+            f"/repos/{self.config.owner}/{repo_name}/git/commits",
+            {"message": message, "tree": tree_sha, "parents": parents},
+        )
+
+    def create_ref(self, repo_name: str, branch: str, commit_sha: str) -> dict[str, Any]:
         if not self.config.owner:
             raise RuntimeError("GITHUB_OWNER is required for live GitHub mode.")
         return self.request(
             "POST",
-            f"/repos/{self.config.owner}/{repo_name}/git/commits",
-            {"message": message, "tree": tree_sha, "parents": [parent_sha]},
+            f"/repos/{self.config.owner}/{repo_name}/git/refs",
+            {"ref": f"refs/heads/{branch}", "sha": commit_sha},
         )
 
     def update_ref(self, repo_name: str, branch: str, commit_sha: str) -> dict[str, Any]:
@@ -177,6 +199,7 @@ def _mock_create_repo(repo_name: str, visibility: str) -> ToolResult:
 
 
 def _mock_commit_files(request: CommitFilesRequest) -> ToolResult:
+    owner = os.getenv("GITHUB_OWNER", "mock-owner")
     commit = mock_store.commit_files(
         request.repo_name,
         {file.path: file.content for file in request.files},
@@ -187,6 +210,7 @@ def _mock_commit_files(request: CommitFilesRequest) -> ToolResult:
         {
             "repo_name": request.repo_name,
             "commit_sha": commit.sha,
+            "commit_url": f"https://github.com/{owner}/{request.repo_name}/commit/{commit.sha}",
             "message": request.message,
             "files_changed": len(request.files),
             "changed_files": commit.files_changed,
@@ -297,12 +321,89 @@ def create_repo(
     ).model_dump(mode="json")
 
 
+def _is_empty_repository_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "409" in message and "empty" in message
+
+
+def _tree_elements_from_files(client: GitHubClient, repo_name: str, files: list) -> list[dict[str, Any]]:
+    tree_elements: list[dict[str, Any]] = []
+    for file_payload in files:
+        blob = client.create_blob(repo_name, file_payload.content)
+        tree_elements.append(
+            {
+                "path": file_payload.path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob["sha"],
+            }
+        )
+    return tree_elements
+
+
+def _finalize_commit_result(
+    *,
+    request: CommitFilesRequest,
+    active_config: GitHubConfig,
+    commit_sha: str,
+    branch: str,
+) -> dict:
+    from tools.verifier import verify_commit
+
+    verification = verify_commit(request.repo_name, commit_sha, config=active_config)
+    verification_status = verification.get("verification_status", "failed")
+    output = {
+        "repo_name": request.repo_name,
+        "commit_sha": commit_sha,
+        "commit_url": (
+            f"https://github.com/{active_config.owner}/{request.repo_name}/commit/{commit_sha}"
+            if active_config.owner
+            else None
+        ),
+        "message": request.message,
+        "files_changed": len(request.files),
+        "changed_files": [file.path for file in request.files],
+        "status": "committed",
+        "branch": branch,
+        "verification": verification.get("output", {}),
+    }
+    if verification_status != "verified":
+        return ToolResult.failure(
+            "github.commit_files",
+            verification.get("error") or "Commit was created but verification failed.",
+            output,
+            verification_status="failed",
+        ).model_dump(mode="json")
+    return ToolResult.success("github.commit_files", output).model_dump(mode="json")
+
+
+def _commit_files_to_empty_repository(
+    client: GitHubClient,
+    request: CommitFilesRequest,
+    *,
+    branch: str,
+    config: GitHubConfig,
+) -> dict:
+    tree_elements = _tree_elements_from_files(client, request.repo_name, request.files)
+    tree = client.create_tree(request.repo_name, tree_elements)
+    commit = client.create_commit(request.repo_name, request.message, tree["sha"])
+    commit_sha = commit["sha"]
+    client.create_ref(request.repo_name, branch, commit_sha)
+    return _finalize_commit_result(
+        request=request,
+        active_config=config,
+        commit_sha=commit_sha,
+        branch=branch,
+    )
+
+
 def commit_files(
     repo_name: str,
     files: list[dict],
     message: str,
     *,
     config: GitHubConfig | None = None,
+    allow_existing_repo: bool = False,
 ) -> dict:
     """Commit multiple text files to a generated repository in one Git commit."""
 
@@ -315,7 +416,10 @@ def commit_files(
             {"validation_error": safe_validation_errors(exc.errors(include_url=False))},
         ).model_dump(mode="json")
 
-    policy_error = validate_github_mutation("commit_files", request.repo_name, request.files)
+    if allow_existing_repo:
+        policy_error = validate_action("commit_files") or validate_file_payloads(request.files)
+    else:
+        policy_error = validate_github_mutation("commit_files", request.repo_name, request.files)
     if policy_error:
         return policy_error.model_dump(mode="json")
 
@@ -327,50 +431,44 @@ def commit_files(
     try:
         repo = client.get_repo(request.repo_name)
         branch = repo.get("default_branch") or "main"
-        ref = client.get_ref(request.repo_name, branch)
+        if repo.get("size", 1) == 0:
+            return _commit_files_to_empty_repository(
+                client,
+                request,
+                branch=branch,
+                config=active_config,
+            )
+
+        try:
+            ref = client.get_ref(request.repo_name, branch)
+        except RuntimeError as exc:
+            if _is_empty_repository_error(exc):
+                return _commit_files_to_empty_repository(
+                    client,
+                    request,
+                    branch=branch,
+                    config=active_config,
+                )
+            raise
+
         parent_sha = ref["object"]["sha"]
         parent_commit = client.get_commit(request.repo_name, parent_sha)
         base_tree_sha = parent_commit["commit"]["tree"]["sha"]
-
-        tree_elements = []
-        for file_payload in request.files:
-            blob = client.create_blob(request.repo_name, file_payload.content)
-            tree_elements.append(
-                {
-                    "path": file_payload.path,
-                    "mode": "100644",
-                    "type": "blob",
-                    "sha": blob["sha"],
-                }
-            )
-
-        tree = client.create_tree(request.repo_name, base_tree_sha, tree_elements)
-        commit = client.create_commit(request.repo_name, request.message, tree["sha"], parent_sha)
+        tree_elements = _tree_elements_from_files(client, request.repo_name, request.files)
+        tree = client.create_tree(request.repo_name, tree_elements, base_tree_sha=base_tree_sha)
+        commit = client.create_commit(
+            request.repo_name,
+            request.message,
+            tree["sha"],
+            parent_sha=parent_sha,
+        )
         commit_sha = commit["sha"]
         client.update_ref(request.repo_name, branch, commit_sha)
-
-        from tools.verifier import verify_commit
-
-        verification = verify_commit(request.repo_name, commit_sha, config=active_config)
-        verification_status = verification.get("verification_status", "failed")
-        output = {
-            "repo_name": request.repo_name,
-            "commit_sha": commit_sha,
-            "message": request.message,
-            "files_changed": len(request.files),
-            "changed_files": [file.path for file in request.files],
-            "status": "committed",
-            "branch": branch,
-            "verification": verification.get("output", {}),
-        }
-        status = "success" if verification_status == "verified" else "failed"
-        if status == "failed":
-            return ToolResult.failure(
-                "github.commit_files",
-                verification.get("error") or "Commit was created but verification failed.",
-                output,
-                verification_status="failed",
-            ).model_dump(mode="json")
-        return ToolResult.success("github.commit_files", output).model_dump(mode="json")
+        return _finalize_commit_result(
+            request=request,
+            active_config=active_config,
+            commit_sha=commit_sha,
+            branch=branch,
+        )
     except Exception as exc:
         return ToolResult.failure("github.commit_files", str(exc)).model_dump(mode="json")

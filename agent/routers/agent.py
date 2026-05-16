@@ -22,6 +22,7 @@ from agent.service import AgentService
 from agent.task_store import ApprovalNotFoundError, TaskNotFoundError
 
 router = APIRouter(prefix="/agent")
+orchestrator_router = APIRouter(prefix="/api/orchestrator")
 FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
 
 
@@ -31,6 +32,20 @@ FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data"
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def run_agent(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    service: AgentService = Depends(get_agent_service),
+) -> RunAgentResponse:
+    run_request = await _parse_run_agent_request(request)
+    return await service.start_task(run_request, background_tasks=background_tasks)
+
+
+@orchestrator_router.post(
+    "/start-project",
+    response_model=RunAgentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_project(
     request: Request,
     background_tasks: BackgroundTasks,
     service: AgentService = Depends(get_agent_service),
@@ -116,12 +131,18 @@ async def _read_form_payload(request: Request) -> dict[str, Any]:
     )
     payload = {
         "idea": form.get("idea"),
-        "repo_visibility": form.get("repo_visibility") or "public",
+        "repo_visibility": form.get("repo_visibility") or form.get("visibility") or "public",
+        "repo_preference": form.get("repo_preference") or form.get("repoPreference") or "create_new_repo",
+        "repo_name": form.get("repo_name") or form.get("repoName"),
+        "repo_url": form.get("repo_url") or form.get("repoUrl"),
+        "branch": form.get("branch") or "main",
         "demo_mode": form.get("demo_mode") or False,
         "title": form.get("title"),
-        "primary_rules_url": form.get("primary_rules_url") or form.get("rules_url"),
+        "primary_rules_url": form.get("primary_rules_url") or form.get("rules_url") or form.get("rulesUrl"),
         "rules_url": form.get("rules_url"),
-        "additional_urls": _form_text_list(form, "additional_urls"),
+        "additional_urls": _form_text_list(form, "additional_urls")
+        + _form_text_list(form, "referenceUrls")
+        + _form_text_list(form, "reference_urls"),
         "additional_files": additional_files,
         "uploaded_file_contents": uploaded_file_contents,
         "source": form.get("source"),

@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from agent.adapters import RagMemoryAdapter, ToolAdapter, AuditAdapter
 from agent.schemas import AgentStep
 
-from agent.rag.build_context import get_build_context
+from agent.rag.build_context import build_build_context_response
 from agent.rag.retrieve import search_rag
-from agent.rag.types import BuildContextOptionalParams
+from agent.rag.types import BuildContextOptionalParams, BuildContextRequest
 from tools.github_tool import create_repo, commit_files
 from tools.github_tool import GitHubConfig
+from tools.policy import normalize_generated_repo_name
 from tools.build_checker import check_repo_health
 from tools.blocker_detector import detect_blocker
 from tools.verifier import verify_commit
@@ -48,17 +49,25 @@ class LiveRagMemoryAdapter:
         idea: str,
         *,
         optional_params: dict[str, Any] | None = None,
+        rules_url: str | None = None,
+        reference_urls: list[str] | None = None,
+        context_needed: list[str] | None = None,
         top_k: int = 8,
     ) -> dict[str, Any]:
         parsed_params: BuildContextOptionalParams | None = None
         if optional_params:
             parsed_params = BuildContextOptionalParams.model_validate(optional_params)
 
-        response = await get_build_context(
-            project_id,
-            idea,
-            optional_params=parsed_params,
-            top_k=top_k,
+        response = await build_build_context_response(
+            BuildContextRequest(
+                projectId=project_id,
+                idea=idea,
+                rulesUrl=rules_url,
+                referenceUrls=reference_urls or [],
+                optionalParams=parsed_params,
+                contextNeeded=context_needed or DEFAULT_BUILD_CONTEXT_NEEDED,
+                topK=top_k,
+            )
         )
         payload = response.model_dump()
         payload["mode"] = "live"
@@ -78,13 +87,57 @@ class LiveRagMemoryAdapter:
 class LiveToolAdapter:
     def __init__(self, github_config: GitHubConfig | None = None) -> None:
         self._github_config = github_config
+        self._allow_existing_repo = False
 
     def set_github_config(self, config: GitHubConfig) -> None:
         self._github_config = config
 
-    def create_repo(self, task_id: str, visibility: str) -> dict[str, Any]:
+    def create_repo(
+        self,
+        task_id: str,
+        visibility: str,
+        *,
+        repo_preference: str = "create_new_repo",
+        repo_name: str | None = None,
+        repo_url: str | None = None,
+    ) -> dict[str, Any]:
+        if self._github_config is None:
+            return {
+                "tool": "github.create_repo",
+                "status": "failed",
+                "mock_mode": False,
+                "recoverable": False,
+                "repo": {},
+                "summary": "Live GitHub connection is required before repository creation.",
+            }
+        if repo_preference == "use_existing_repo":
+            active_repo_name = repo_name or _repo_name_from_url(repo_url)
+            if not active_repo_name:
+                return {
+                    "tool": "github.use_existing_repo",
+                    "status": "failed",
+                    "mock_mode": False,
+                    "recoverable": False,
+                    "repo": {},
+                    "summary": "Existing repo mode requires repoName or repoUrl.",
+                }
+            self._allow_existing_repo = True
+            return {
+                "tool": "github.use_existing_repo",
+                "status": "success",
+                "mock_mode": False,
+                "recoverable": False,
+                "repo": {
+                    "name": active_repo_name,
+                    "visibility": visibility,
+                    "url": repo_url or f"https://github.com/{self._github_config.owner}/{active_repo_name}",
+                },
+                "summary": "Using the connected existing GitHub repository.",
+            }
+        self._allow_existing_repo = False
+        normalized_repo_name = normalize_generated_repo_name(repo_name, task_id=task_id)
         raw_result = create_repo(
-            repo_name=f"mvpilot-generated-{task_id[:8]}",
+            repo_name=normalized_repo_name,
             description="Generated MVP",
             visibility=visibility,
             config=self._github_config,
@@ -109,11 +162,24 @@ class LiveToolAdapter:
         }
 
     def commit_files(self, repo_name: str, files: list[dict[str, Any]], message: str) -> dict[str, Any]:
+        if self._github_config is None:
+            return {
+                "tool": "github.commit_files",
+                "status": "failed",
+                "mock_mode": False,
+                "recoverable": False,
+                "repo": repo_name,
+                "files": [],
+                "commit_sha": None,
+                "commit_url": None,
+                "summary": "Live GitHub connection is required before committing files.",
+            }
         raw_result = commit_files(
             repo_name=repo_name,
             files=files,
             message=message,
             config=self._github_config,
+            allow_existing_repo=self._allow_existing_repo,
         )
         output = raw_result.get("output", {})
         return {
@@ -124,6 +190,7 @@ class LiveToolAdapter:
             "repo": repo_name,
             "files": output.get("changed_files") or [file.get("path") for file in files],
             "commit_sha": output.get("commit_sha"),
+            "commit_url": output.get("commit_url"),
             "summary": _summary(
                 raw_result,
                 success="Committed generated files and verified commit.",
@@ -133,7 +200,11 @@ class LiveToolAdapter:
         }
 
     def check_repo_health(self, repo_name: str) -> dict[str, Any]:
-        raw_result = check_repo_health(repo_name, config=self._github_config)
+        raw_result = check_repo_health(
+            repo_name,
+            config=self._github_config,
+            allow_existing_repo=self._allow_existing_repo,
+        )
         output = raw_result.get("output", {})
         return {
             "tool": raw_result.get("tool_name", "github.check_repo_health"),
@@ -229,18 +300,33 @@ class LiveAuditAdapter:
     def __init__(self, model_name: str):
         self._model_name = model_name
 
-    def write_audit_log(self, node_name: str, message: str, decision_trace: list[str], status: str = "completed") -> AgentStep:
+    def write_audit_log(
+        self,
+        node_name: str,
+        message: str,
+        decision_trace: list[str],
+        status: str = "completed",
+        *,
+        project_id: str | None = None,
+        flight_stage: str | None = None,
+        agent: str | None = None,
+    ) -> AgentStep:
         log_audit_event(
-            task_id=None,
+            task_id=project_id,
             step=node_name,
             message=message,
             data={
                 "status": status,
                 "model": self._model_name,
+                "flight_stage": flight_stage,
+                "agent": agent,
                 "decision_trace": decision_trace,
             },
         )
         return AgentStep(
+            project_id=project_id,
+            flight_stage=flight_stage,
+            agent=agent,
             node_name=node_name,
             status=status,
             message=message,
@@ -286,3 +372,24 @@ def _summary(raw_result: dict[str, Any], *, success: str, failure: str) -> str:
     if raw_result.get("status") in {"success", "mock"}:
         return success
     return raw_result.get("error") or failure
+
+
+def _repo_name_from_url(repo_url: str | None) -> str | None:
+    if not repo_url:
+        return None
+    candidate = repo_url.rstrip("/").split("/")[-1].strip()
+    return candidate or None
+
+
+DEFAULT_BUILD_CONTEXT_NEEDED = [
+    "required_deliverables",
+    "allowed_tools_apis",
+    "required_repository_format",
+    "required_demo_format",
+    "required_tech_stack_pieces",
+    "hackathon_rules",
+    "nvidia_model_usage",
+    "security_constraints",
+    "agent_boundaries",
+    "scope_warnings",
+]

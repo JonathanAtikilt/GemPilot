@@ -4,13 +4,25 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.rag.url_utils import collect_source_urls
 
 
 MAX_ADDITIONAL_URLS = 5
 MAX_UPLOADED_FILES = 5
+RepoVisibility = Literal["public", "private"]
+RepoPreference = Literal["create_new_repo", "use_existing_repo"]
+FlightStage = Literal[
+    "preflight",
+    "radar_scan",
+    "flight_plan",
+    "autopilot",
+    "black_box",
+    "landed",
+    "failed",
+]
+FlightAgent = Literal["frontend", "orchestrator", "rag", "github", "black_box"]
 
 
 class TaskStatus(str, Enum):
@@ -38,14 +50,38 @@ class UploadedSourceFileContent(UploadedSourceFile):
 
 
 class RunAgentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str | None = None
     idea: str = Field(min_length=1)
-    repo_visibility: Literal["public", "private"]
+    repo_visibility: RepoVisibility = Field(
+        default="public",
+        validation_alias=AliasChoices("repo_visibility", "visibility"),
+    )
+    repo_preference: RepoPreference = Field(
+        default="create_new_repo",
+        validation_alias=AliasChoices("repo_preference", "repoPreference"),
+    )
+    repo_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_name", "repoName"),
+    )
+    repo_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("repo_url", "repoUrl"),
+    )
+    branch: str = "main"
     demo_mode: bool = False
     source: str | None = None
-    primary_rules_url: str | None = None
+    primary_rules_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("primary_rules_url", "rules_url", "rulesUrl"),
+    )
     rules_url: str | None = None
-    additional_urls: list[str] = Field(default_factory=list)
+    additional_urls: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("additional_urls", "reference_urls", "referenceUrls"),
+    )
     source_urls: list[str] = Field(default_factory=list)
     additional_files: list[UploadedSourceFile] = Field(default_factory=list)
     uploaded_file_contents: list[UploadedSourceFileContent] = Field(
@@ -61,6 +97,9 @@ class RunAgentRequest(BaseModel):
         "source",
         "primary_rules_url",
         "rules_url",
+        "repo_name",
+        "repo_url",
+        "branch",
         "github_connection_id",
         mode="before",
     )
@@ -126,7 +165,11 @@ class TaskRecord(BaseModel):
     id: str
     title: str | None = None
     idea: str
-    repo_visibility: Literal["public", "private"]
+    repo_visibility: RepoVisibility
+    repo_preference: RepoPreference = "create_new_repo"
+    repo_name: str | None = None
+    repo_url: str | None = None
+    branch: str = "main"
     demo_mode: bool
     source: str | None = None
     primary_rules_url: str | None = None
@@ -141,6 +184,9 @@ class TaskRecord(BaseModel):
 
 
 class AgentStep(BaseModel):
+    project_id: str | None = None
+    flight_stage: FlightStage | None = None
+    agent: FlightAgent | None = None
     node_name: str
     status: str
     message: str
