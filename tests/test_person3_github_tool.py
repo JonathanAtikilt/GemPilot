@@ -626,6 +626,25 @@ class Person3GitHubToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "mock")
         self.assertTrue(result["output"]["healthy"])
 
+    def test_repo_health_passes_when_walkthrough_serves_as_demo_script(self):
+        with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):
+            commit_files(
+                "mvpilot-generated-walkthrough",
+                [
+                    {"path": "README.md", "content": "# Demo"},
+                    {"path": "docs/BUILD_LOG.md", "content": "# Log"},
+                    {"path": "docs/ARCHITECTURE.md", "content": "# Architecture"},
+                    {"path": "docs/WALKTHROUGH.md", "content": "# Walkthrough"},
+                    {"path": "package.json", "content": "{}"},
+                    {"path": "src/App.jsx", "content": "export default function App(){}"},
+                ],
+                "Add walkthrough-only demo",
+            )
+            result = check_repo_health("mvpilot-generated-walkthrough")
+
+        self.assertEqual(result["status"], "mock")
+        self.assertTrue(result["output"]["healthy"])
+
     def test_repo_health_passes_for_complete_mock_repo(self):
         with patch.dict("os.environ", {"MVPILOT_MOCK_TOOLS": "true"}, clear=True):
             commit_files(
@@ -664,6 +683,7 @@ class Person3GitHubToolTests(unittest.TestCase):
                 {"path": "logs/build_log.md"},
                 {"path": "demo/demo_script.md"},
                 RuntimeError("missing demo_script.md"),
+                RuntimeError("missing docs/WALKTHROUGH.md"),
                 {"path": "docs/ARCHITECTURE.md"},
                 RuntimeError("missing package.json"),
                 {"path": "requirements.txt"},

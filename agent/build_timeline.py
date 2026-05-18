@@ -5,19 +5,33 @@ from typing import Any, Literal
 
 TimelineStatus = Literal["pending", "running", "completed", "failed"]
 
-# Product-facing phases shown in the Mission Control UI.
+
 BUILD_TIMELINE_PHASES: tuple[dict[str, str], ...] = (
-    {"id": "understand_idea", "title": "Understanding user idea", "category": "planning"},
-    {"id": "extract_requirements", "title": "Extracting MVP requirements", "category": "planning"},
-    {"id": "plan_architecture", "title": "Planning architecture", "category": "planning"},
-    {"id": "decompose_tasks", "title": "Decomposing tasks", "category": "planning"},
-    {"id": "create_repo_structure", "title": "Creating repo structure", "category": "github"},
-    {"id": "generate_frontend", "title": "Generating frontend", "category": "code"},
-    {"id": "generate_backend", "title": "Generating backend/API layer", "category": "code"},
-    {"id": "add_mock_integrations", "title": "Adding labeled mock integrations", "category": "code"},
-    {"id": "create_documentation", "title": "Creating documentation", "category": "code"},
-    {"id": "validate_output", "title": "Validating idea-specific output", "category": "validation"},
-    {"id": "finalize_repo", "title": "Finalizing repo", "category": "delivery"},
+    {"id": "idea_intake", "title": "Idea intake", "category": "planning"},
+    {"id": "requirement_expansion", "title": "Requirement expansion", "category": "planning"},
+    {"id": "domain_research", "title": "Domain research", "category": "research"},
+    {"id": "reference_url_analysis", "title": "Reference URL analysis", "category": "research"},
+    {"id": "user_goal_interpretation", "title": "User goal interpretation", "category": "planning"},
+    {"id": "feature_system_design", "title": "Feature system design", "category": "architecture"},
+    {
+        "id": "tech_stack_recommendation",
+        "title": "Tech stack recommendation",
+        "category": "planning",
+    },
+    {"id": "data_model_design", "title": "Data model design", "category": "architecture"},
+    {"id": "api_design", "title": "API design", "category": "architecture"},
+    {"id": "frontend_architecture", "title": "Frontend architecture", "category": "architecture"},
+    {"id": "backend_architecture", "title": "Backend architecture", "category": "architecture"},
+    {"id": "auth_authorization_design", "title": "Auth and authorization design", "category": "architecture"},
+    {"id": "database_schema_planning", "title": "Database schema planning", "category": "architecture"},
+    {"id": "file_tree_generation", "title": "File tree generation", "category": "code"},
+    {"id": "code_implementation", "title": "Code implementation", "category": "code"},
+    {"id": "testing_strategy", "title": "Testing strategy", "category": "validation"},
+    {"id": "documentation_generation", "title": "Documentation generation", "category": "code"},
+    {"id": "deployment_instructions", "title": "Deployment instructions", "category": "delivery"},
+    {"id": "github_repo_export", "title": "GitHub repo export", "category": "github"},
+    {"id": "build_test_validation", "title": "Build and test validation", "category": "validation"},
+    {"id": "final_project_report", "title": "Final project report", "category": "delivery"},
 )
 
 

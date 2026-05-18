@@ -63,15 +63,60 @@ type BuildTimelineEvent = {
   updated_at?: string | null;
 };
 
+type DemoPathStep = {
+  step?: string;
+  screen?: string;
+  action?: string;
+  api?: string | null;
+};
+
+type ProjectDepth =
+  | "Starter Project"
+  | "Advanced Project"
+  | "Production-Style Project"
+  | "Hackathon-Winning Project";
+
+const PROJECT_DEPTHS: ProjectDepth[] = [
+  "Starter Project",
+  "Advanced Project",
+  "Production-Style Project",
+  "Hackathon-Winning Project",
+];
+
+const TARGET_PLATFORMS = ["web app", "mobile app", "api", "ai agent", "browser extension", "dashboard"];
+
+type RecommendedStack = {
+  frontend?: string;
+  backend?: string;
+  database?: string;
+  authentication?: string;
+  aiModels?: string[];
+  orchestration?: string[];
+  ragRetrieval?: string;
+  vectorStorage?: string;
+  deployment?: string;
+  testing?: string;
+  reasonForChoices?: string[];
+  hackathonRuleAlignment?: string[];
+  rejectedAlternatives?: string[];
+  ruleConflicts?: string[];
+};
+
 type MvpPlan = {
   title?: string | null;
   idea?: string;
   target_users?: string | null;
   tech_stack_preference?: string | null;
   features?: string[];
+  vertical_pack?: string | null;
+  demo_path?: DemoPathStep[];
+  primary_entity?: string | null;
+  api_routes?: string[];
   architecture_notes?: string | null;
   implementation_steps?: string[];
   selected_stack?: string | null;
+  recommended_stack?: RecommendedStack | null;
+  recommendedStack?: RecommendedStack | null;
   runtime?: string;
 };
 
@@ -92,6 +137,8 @@ type TaskDetail = {
   } | null;
   mvp_delivery?: {
     project_title?: string;
+    vertical_pack?: string | null;
+    demo_path_checklist?: string[];
     completed_features?: string[];
     mocked_features?: string[];
     pending_features?: string[];
@@ -129,25 +176,32 @@ type AdditionalSource =
   | { id: number; type: "url"; value: string }
   | { id: number; type: "file"; file: File | null };
 
+const BRAND_NAME = "NemoPilot";
+
 const defaultTitle = "StudyPilot";
 const defaultIdea =
   "Build StudyPilot, an AI study planner that turns messy course goals into weekly plans, focus sessions, and progress dashboards for college students.";
 /** Optional product/rules URL prefilled for localhost demo; clear the field to skip RAG fetch. */
 const defaultReferenceUrl = "https://www.shortesthack.com/?tab=rules";
 
+const inputClassName =
+  "mt-2 w-full rounded-xl border border-slate-600/80 bg-slate-950/80 px-3.5 py-2.5 text-sm leading-6 text-slate-100 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25";
+
+const labelClassName = "block text-sm font-medium text-slate-300";
+
 const flightStops: AgentStep[] = [
-  { key: "preflight", phase: "PREFLIGHT", title: "Preflight Check", detail: "Package the idea, repo preference, GitHub connection, rules URL, and extra source material.", status: "Ready" },
-  { key: "radar_scan", phase: "RADAR", title: "Radar Scan", detail: "Retrieve hackathon rules, NVIDIA docs, uploaded files, logs, and RAG evidence.", status: "Pending" },
-  { key: "flight_plan", phase: "PLAN", title: "Flight Plan", detail: "Nemotron uses RAG build context to generate the implementation plan.", status: "Pending" },
-  { key: "autopilot", phase: "AUTOPILOT", title: "Autopilot Engaged", detail: "GitHub Agent creates or updates the repo, commits files, and verifies outputs.", status: "Pending" },
-  { key: "black_box", phase: "BLACK BOX", title: "Black Box Recorder", detail: "Store logs, decisions, artifacts, errors, and final memory.", status: "Pending" },
-  { key: "landed", phase: "LANDED", title: "MVP Landed", detail: "Final repo, commit, build log, and architecture links are ready.", status: "Pending" },
+  { key: "preflight", phase: "Setup", title: "Getting started", detail: "Your idea, GitHub connection, and optional reference materials.", status: "Ready" },
+  { key: "radar_scan", phase: "Context", title: "Gathering context", detail: "Rules, docs, uploads, and RAG evidence for your project.", status: "Pending" },
+  { key: "flight_plan", phase: "Plan", title: "Planning", detail: "Nemotron designs requirements, stack, and architecture.", status: "Pending" },
+  { key: "autopilot", phase: "Build", title: "Building", detail: "Code generation, validation, and GitHub export.", status: "Pending" },
+  { key: "black_box", phase: "Logs", title: "Recording progress", detail: "Agent logs, decisions, and artifacts saved for review.", status: "Pending" },
+  { key: "landed", phase: "Done", title: "Ready to ship", detail: "Repository, docs, and demo materials are available.", status: "Pending" },
 ];
 
 const sourceTypes = [
-  "Optional product, rules, or API documentation URL",
-  "Additional OpenClaw or Nemotron documentation URLs",
-  "Optional uploaded README, TXT, Markdown, JSON, or CSV files",
+  "Product, rules, or API documentation URL (optional)",
+  "Extra Nemotron or OpenClaw documentation links",
+  "Uploaded README, Markdown, text, JSON, or CSV files",
 ];
 
 type GithubOAuthConfig = {
@@ -222,13 +276,13 @@ function formatWorkflowError(message: string): string {
   if (message.includes("already exists") || message.includes("name already exists")) {
     return [
       message,
-      "MVPilot will reuse an existing repo with the same name on the next launch, or you can change the repo name below.",
+      `${BRAND_NAME} will reuse an existing repo with the same name on the next launch, or you can change the repo name below.`,
     ].join(" ");
   }
   if (message.includes("Git Repository is empty") || message.includes("repository is empty")) {
     return [
       "The existing GitHub repo has no commits yet.",
-      "MVPilot will now seed an initial commit automatically — click New launch and try again.",
+      `${BRAND_NAME} will now seed an initial commit automatically — click Start over and try again.`,
       "Or add any file (e.g. README) on github.com first, then relaunch.",
     ].join(" ");
   }
@@ -258,6 +312,14 @@ function githubStatusLabel(status: GithubStatus): string {
   return "Not connected";
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  Ready: "Ready",
+  Running: "In progress",
+  Pending: "Waiting",
+  Complete: "Done",
+  Failed: "Needs attention",
+};
+
 function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
     Ready: "border-[#3a494b] bg-[#1c1f29] text-[#b9cacb]",
@@ -268,18 +330,18 @@ function StatusPill({ status }: { status: string }) {
   };
 
   return (
-    <span className={`rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest ${styles[status] ?? styles.Pending}`}>
-      {status}
+    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${styles[status] ?? styles.Pending}`}>
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
 
-function PlaneMarker({ progress }: { progress: number }) {
+function ProgressMarker({ progress }: { progress: number }) {
   return (
     <div className="absolute top-0 z-20 -translate-x-1/2 transition-all duration-700" style={{ left: `${progress}%` }}>
-      <div className="flex items-center gap-1 rounded-full border border-[#00f2ff]/50 bg-[#00f2ff] px-2 py-1 text-[10px] font-black tracking-widest text-[#00363a] shadow-[0_0_18px_rgba(0,242,255,0.55)]">
-        <span className="h-0 w-0 border-y-[5px] border-l-[9px] border-y-transparent border-l-[#00363a]" />
-        MVP
+      <div className="flex items-center gap-1.5 rounded-full border border-indigo-400/60 bg-indigo-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow-lg shadow-indigo-500/30">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[9px]">NP</span>
+        Build
       </div>
     </div>
   );
@@ -329,8 +391,11 @@ export default function Home() {
   const [requiredFeatures, setRequiredFeatures] = useState(
     "Study goal intake, weekly plan generator, focus session tracker, progress dashboard, API health check",
   );
+  const [projectDepth, setProjectDepth] = useState<ProjectDepth>("Advanced Project");
+  const [targetPlatform, setTargetPlatform] = useState("web app");
+  const [useOpenClawOrchestration, setUseOpenClawOrchestration] = useState(true);
   const [repoDescription, setRepoDescription] = useState(
-    "StudyPilot — an autonomous MVP generated by MVPilot.",
+    `StudyPilot — a full project generated by ${BRAND_NAME}.`,
   );
   const [primaryRulesUrl, setPrimaryRulesUrl] = useState(defaultReferenceUrl);
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
@@ -343,11 +408,13 @@ export default function Home() {
   const [githubUsername, setGithubUsername] = useState<string | null>(null);
   const [githubStatus, setGithubStatus] = useState<GithubStatus>("not_connected");
   const [githubOAuthConfig, setGithubOAuthConfig] = useState<GithubOAuthConfig | null>(null);
-  const [githubMessage, setGithubMessage] = useState("Connect GitHub so MVPilot can create the project repo through backend OAuth.");
+  const [githubMessage, setGithubMessage] = useState(
+    `Connect GitHub so ${BRAND_NAME} can create and push your project repository.`,
+  );
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [message, setMessage] = useState("Ready for preflight. Add the build brief and launch MVPilot.");
+  const [message, setMessage] = useState("Ready for preflight. Add the project brief and launch generation.");
 
   useEffect(() => {
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
@@ -528,7 +595,10 @@ export default function Home() {
 
   const payloadPreview = useMemo(
     () => ({
-      title: projectTitle.trim() || "Untitled MVP idea",
+      title: projectTitle.trim() || "Untitled project idea",
+      projectDepth,
+      targetPlatform,
+      useOpenClawOrchestration,
       idea,
       github_connected: Boolean(githubConnectionId),
       github_connection_id: githubConnectionId,
@@ -557,11 +627,13 @@ export default function Home() {
         .filter(Boolean),
       source: "mvpilot_frontend",
     }),
-    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectTitle, repoDescription, repoPreference, requestedRepoName, requiredFeatures, targetUsers, techStackPreference, visibility],
+    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectDepth, projectTitle, repoDescription, repoPreference, requestedRepoName, requiredFeatures, targetPlatform, targetUsers, techStackPreference, useOpenClawOrchestration, visibility],
   );
 
   const buildTimeline = taskDetail?.build_timeline ?? [];
   const mvpPlan = taskDetail?.mvp_plan ?? taskDetail?.final_report?.mvp_plan ?? null;
+  const recommendedStack =
+    mvpPlan?.recommended_stack ?? mvpPlan?.recommendedStack ?? null;
   const rawMvpDelivery = taskDetail?.mvp_delivery ?? taskDetail?.final_report?.mvp_delivery ?? null;
   const rawMvpValidation = taskDetail?.mvp_validation ?? taskDetail?.final_report?.mvp_validation ?? null;
   const mvpValidation =
@@ -635,7 +707,7 @@ export default function Home() {
     setTaskId(null);
     setTaskDetail(null);
     setSubmitState("idle");
-    setMessage("Ready for preflight. Add the build brief and launch MVPilot.");
+    setMessage(`Tell us about your project, then click Start building.`);
     window.sessionStorage.removeItem("mvpilot_task_id");
   }
 
@@ -709,7 +781,7 @@ export default function Home() {
 
     if (!apiBaseUrl) {
       setSubmitState("error");
-      setMessage("NEXT_PUBLIC_AGENT_API_URL is missing. Configure the FastAPI backend URL before launching a real MVPilot build.");
+      setMessage("NEXT_PUBLIC_AGENT_API_URL is missing. Start the backend before running a build.");
       return;
     }
 
@@ -738,6 +810,9 @@ export default function Home() {
     if (techStackPreference.trim()) formData.append("techStackPreference", techStackPreference.trim());
     payloadPreview.requiredFeatures.forEach((feature) => formData.append("requiredFeatures", feature));
     formData.append("source", "mvpilot_frontend");
+    formData.append("projectDepth", projectDepth);
+    formData.append("targetPlatform", targetPlatform);
+    formData.append("useOpenClawOrchestration", useOpenClawOrchestration ? "true" : "false");
 
     if (githubConnectionId) {
       formData.append("github_connected", "true");
@@ -771,7 +846,7 @@ export default function Home() {
       setTaskId(launchedTaskId);
       window.sessionStorage.setItem("mvpilot_task_id", launchedTaskId);
       setSubmitState("sent");
-      setMessage("MVPilot is airborne. Polling live flight telemetry from the orchestrator.");
+      setMessage(`${BRAND_NAME} is building your project. You can watch progress below.`);
     } catch (error) {
       setSubmitState("error");
       setMessage(error instanceof Error ? error.message : "Could not reach the agent endpoint.");
@@ -779,28 +854,28 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0e17] text-[#dfe2ef] [background-image:linear-gradient(rgba(0,242,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,242,255,0.03)_1px,transparent_1px)] [background-size:20px_20px]">
+    <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950/30 text-slate-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-5 py-5 lg:px-8">
         <header className="flex h-auto flex-col gap-4 border-b border-[#3a494b]/50 bg-[#0f131c]/80 pb-5 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[#00f2ff]/30 bg-[#00f2ff]/10 font-mono text-sm font-black text-[#00f2ff] shadow-[0_0_15px_rgba(0,242,255,0.16)]">MP</div>
-              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">Mission Control</p>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 shadow-[0_0_15px_rgba(0,242,255,0.16)]">NP</div>
+              <p className="text-sm font-medium text-indigo-300">Powered by Nemotron</p>
             </div>
             <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-normal text-[#e1fdff] lg:text-5xl">
-              MVPilot Flight Control
+              Build real software with AI
             </h1>
             <p className="mt-3 max-w-3xl text-base leading-7 text-[#b9cacb]">
-              Connect GitHub, describe an MVP, create a repo, watch Nemotron/OpenClaw build it, then open the finished GitHub project.
+              Describe what you want to build, connect GitHub, and NemoPilot will plan the stack, write the code, and push a complete repository for you.
             </p>
           </div>
           <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-4 backdrop-blur-xl">
-            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#849495]">System</p>
+            <p className="text-sm font-medium text-slate-400">Status</p>
             <div className="mt-2 flex items-center gap-3">
               <span className="h-2.5 w-2.5 rounded-full bg-[#4edea3] shadow-[0_0_10px_rgba(78,222,163,0.9)]" />
-              <p className="font-mono text-sm font-semibold text-[#4edea3]">FRONTEND STABLE</p>
+              <p className="font-mono text-sm font-semibold text-[#4edea3]">Ready</p>
             </div>
-            <p className="mt-2 font-mono text-xs text-[#b9cacb]">Task: {taskId ? taskId : "NOT LAUNCHED"}</p>
+            <p className="mt-2 font-mono text-xs text-[#b9cacb]">Task: {taskId ? taskId : "Not started"}</p>
           </div>
         </header>
 
@@ -813,8 +888,8 @@ export default function Home() {
                 <section className="rounded-lg border border-[#00f2ff]/15 bg-[#0f131c]/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Preflight Brief</p>
-                      <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#dfe2ef]">Launch Parameters</h2>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Your project</p>
+                      <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#dfe2ef]">Project details</h2>
                     </div>
                     <StatusPill status={submitState === "error" ? "Failed" : "Ready"} />
                   </div>
@@ -826,13 +901,37 @@ export default function Home() {
                   <textarea id="idea" value={idea} onChange={(event) => setIdea(event.target.value)} rows={4} className="mt-2 w-full resize-none rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="target-users">Target users</label>
-                  <input id="target-users" type="text" value={targetUsers} onChange={(event) => setTargetUsers(event.target.value)} placeholder="Who is this MVP for?" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
+                  <input id="target-users" type="text" value={targetUsers} onChange={(event) => setTargetUsers(event.target.value)} placeholder="Who will use this product?" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="tech-stack">Tech stack preference</label>
                   <input id="tech-stack" type="text" value={techStackPreference} onChange={(event) => setTechStackPreference(event.target.value)} placeholder="React, FastAPI, Postgres..." className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="required-features">Required features (comma-separated)</label>
                   <textarea id="required-features" value={requiredFeatures} onChange={(event) => setRequiredFeatures(event.target.value)} rows={2} className="mt-2 w-full resize-none rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="project-depth">
+                      Project depth
+                      <select id="project-depth" value={projectDepth} onChange={(event) => setProjectDepth(event.target.value as ProjectDepth)} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#dfe2ef] outline-none focus:border-[#00f2ff]">
+                        {PROJECT_DEPTHS.map((depth) => (
+                          <option key={depth} value={depth}>{depth}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="target-platform">
+                      Target platform
+                      <select id="target-platform" value={targetPlatform} onChange={(event) => setTargetPlatform(event.target.value)} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#dfe2ef] outline-none focus:border-[#00f2ff]">
+                        {TARGET_PLATFORMS.map((platform) => (
+                          <option key={platform} value={platform}>{platform}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="mt-4 flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]">
+                    <input type="checkbox" checked={useOpenClawOrchestration} onChange={(event) => setUseOpenClawOrchestration(event.target.checked)} className="rounded border-[#3a494b] bg-[#0a0e17] text-[#00f2ff]" />
+                    Prefer OpenClaw orchestration when configured
+                  </label>
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="repo-description">Repo description</label>
                   <input id="repo-description" type="text" value={repoDescription} onChange={(event) => setRepoDescription(event.target.value)} placeholder="Optional GitHub repository description" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
@@ -900,7 +999,7 @@ export default function Home() {
                       <label className="mt-3 block">
                         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Repo name</span>
                         <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} placeholder="mvpilot-generated-your-idea" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
-                        <p className="mt-1 font-mono text-[10px] text-[#849495]">Must start with mvpilot-generated- so repo actions stay scoped to MVPilot output.</p>
+                        <p className="mt-1 font-mono text-[10px] text-[#849495]">New repos must use the prefix mvpilot-generated- (required for safe GitHub automation).</p>
                       </label>
                     ) : (
                       <label className="mt-3 block">
@@ -952,7 +1051,7 @@ export default function Home() {
                   </div>
 
                   <button type="submit" className="mt-5 w-full rounded bg-[#00f2ff] px-4 py-3 font-mono text-xs font-black uppercase tracking-widest text-[#00363a] transition hover:shadow-[0_0_18px_rgba(0,242,255,0.35)] disabled:cursor-not-allowed disabled:bg-[#31353f] disabled:text-[#849495]">
-                    Launch MVPilot
+                    Start building
                   </button>
 
                   <p className="mt-3 rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-xs leading-5 text-[#b9cacb]">{message}</p>
@@ -961,9 +1060,9 @@ export default function Home() {
                 <section className="relative min-h-[500px] overflow-hidden rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/50 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                   <div className="absolute inset-0 opacity-70 [background-image:linear-gradient(rgba(0,242,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(0,242,255,0.04)_1px,transparent_1px)] [background-size:20px_20px]" />
                   <div className="relative z-10">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Flight Path</p>
-                    <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">Parameters staged on runway</h2>
-                    <p className="mt-2 max-w-xl text-sm leading-6 text-[#b9cacb]">After launch, this panel becomes the live checkpoint bar. The plane advances as the Person 1 orchestrator reports progress.</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Build progress</p>
+                    <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">Ready when you are</h2>
+                    <p className="mt-2 max-w-xl text-sm leading-6 text-[#b9cacb]">After you start, this panel shows live progress through planning, building, and GitHub export.</p>
                   </div>
                   <div className="absolute left-8 right-8 top-1/2 h-px bg-[#3a494b]" />
                   <div className="absolute left-8 right-8 top-1/2 flex -translate-y-1/2 justify-between">
@@ -974,7 +1073,7 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-                  <PlaneMarker progress={2} />
+                  <ProgressMarker progress={2} />
                 </section>
               </form>
             ) : (
@@ -983,7 +1082,7 @@ export default function Home() {
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">
-                        {runFailed ? "Flight aborted" : "Autopilot Active"}
+                        {runFailed ? "Build stopped" : "Building your project"}
                       </p>
                       <h2 className="mt-2 text-2xl font-semibold tracking-normal text-[#e1fdff]">{payloadPreview.title}</h2>
                       <p className={`mt-2 max-w-3xl font-mono text-xs leading-5 ${runFailed ? "text-[#ffb4ab]" : "text-[#b9cacb]"}`}>{message}</p>
@@ -999,7 +1098,7 @@ export default function Home() {
                           onClick={resetFlight}
                           className="rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#00f2ff] transition hover:bg-[#00f2ff]/10"
                         >
-                          New launch
+                          Start over
                         </button>
                       ) : null}
                     </div>
@@ -1009,7 +1108,7 @@ export default function Home() {
                     <div className="relative min-w-[900px]">
                       <div className="absolute left-0 right-0 top-8 h-0.5 bg-[#3a494b]" />
                       <div className="absolute left-0 top-8 h-0.5 bg-[#4edea3] shadow-[0_0_10px_rgba(78,222,163,0.65)] transition-all duration-700" style={{ width: `calc(${progressPercent}% - 12px)` }} />
-                      <PlaneMarker progress={progressPercent} />
+                      <ProgressMarker progress={progressPercent} />
                       <div className="grid grid-cols-6 gap-4">
                         {steps.map((step) => (
                           <div key={step.phase} className="relative flex flex-col items-center pt-3 text-center">
@@ -1023,9 +1122,41 @@ export default function Home() {
                   </div>
                 </div>
 
+                {recommendedStack ? (
+                  <div className="mb-5 rounded-lg border border-[#00f2ff]/25 bg-[#181b25]/75 p-5">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Recommended Tech Stack</p>
+                    <p className="mt-2 text-sm text-[#b9cacb]">Project-specific stack from hackathon rules and scope — not NemoPilot&apos;s host stack.</p>
+                    <ul className="mt-3 grid gap-2 text-sm text-[#dfe2ef] sm:grid-cols-2">
+                      {recommendedStack.frontend ? <li>Frontend: {recommendedStack.frontend}</li> : null}
+                      {recommendedStack.backend ? <li>Backend: {recommendedStack.backend}</li> : null}
+                      {recommendedStack.database ? <li>Database: {recommendedStack.database}</li> : null}
+                      {recommendedStack.authentication ? <li>Auth: {recommendedStack.authentication}</li> : null}
+                    </ul>
+                    {recommendedStack.reasonForChoices?.length ? (
+                      <div className="mt-3">
+                        <p className="font-mono text-[10px] uppercase text-[#4edea3]">Reasoning</p>
+                        <ul className="list-disc pl-5 text-sm text-[#b9cacb]">
+                          {recommendedStack.reasonForChoices.map((x) => (
+                            <li key={x}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {recommendedStack.hackathonRuleAlignment?.length ? (
+                      <div className="mt-3">
+                        <p className="font-mono text-[10px] uppercase text-[#ffb86c]">Hackathon alignment</p>
+                        <ul className="list-disc pl-5 text-sm text-[#b9cacb]">
+                          {recommendedStack.hackathonRuleAlignment.map((x) => (
+                            <li key={x}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="grid gap-5 lg:grid-cols-2">
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">OpenClaw Build Timeline</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Build timeline</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{taskDetail?.runtime === "openclaw" ? "OpenClaw orchestration" : "LangGraph orchestration"}</h3>
                     <div className="mt-4 grid max-h-80 gap-2 overflow-y-auto">
                       {buildTimeline.map((phase) => (
@@ -1041,18 +1172,31 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="rounded-lg border border-[#4edea3]/20 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">MVP Plan</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#4edea3]">Project Plan</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{mvpPlan?.title || payloadPreview.title}</h3>
                     {mvpPlan?.features?.length ? (
                       <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-[#b9cacb]">{mvpPlan.features.map((f) => <li key={f}>{f}</li>)}</ul>
                     ) : <p className="mt-3 text-sm text-[#849495]">Plan details appear after scope + repo planning.</p>}
+                    {mvpPlan?.vertical_pack ? (
+                      <p className="mt-3 font-mono text-xs text-[#849495]">Vertical pack: {mvpPlan.vertical_pack}</p>
+                    ) : null}
+                    {mvpPlan?.demo_path?.length ? (
+                      <div className="mt-3">
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#4edea3]">Demo path</p>
+                        <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-[#b9cacb]">
+                          {mvpPlan.demo_path.map((step) => (
+                            <li key={`${step.step}-${step.screen}`}>{step.action || step.screen}{step.api ? ` (${step.api})` : ""}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
                 {mvpValidation ? (
                   <div className="grid gap-5 lg:grid-cols-2">
                     <div className="rounded-lg border border-[#ffb86c]/25 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#ffb86c]">MVP Delivery</p>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#ffb86c]">Delivery summary</p>
                       <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{mvpDelivery?.project_title || mvpPlan?.title || payloadPreview.title}</h3>
                       {mvpDelivery?.model_modes?.length ? (
                         <p className="mt-2 font-mono text-xs text-[#849495]">Model modes: {mvpDelivery.model_modes.join(", ")}</p>
@@ -1077,7 +1221,7 @@ export default function Home() {
                       ) : null}
                     </div>
                     <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Idea Validation</p>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Quality checks</p>
                       <div className="mt-2 flex items-center gap-3">
                         <h3 className="text-xl font-semibold text-[#dfe2ef]">{mvpValidation?.passed ? "Aligned with your idea" : "Review recommended"}</h3>
                         <StatusPill status={mvpValidation?.passed ? "Complete" : "Failed"} />
@@ -1098,7 +1242,7 @@ export default function Home() {
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] lg:col-span-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                       <div>
-                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Agent Activity Log</p>
+                        <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Activity log</p>
                         <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{activityLog.length ? `${activityLog.length} events recorded` : "Waiting for first event"}</h3>
                       </div>
                       <p className="font-mono text-xs uppercase tracking-widest text-[#849495]">Live build timeline</p>
@@ -1119,7 +1263,7 @@ export default function Home() {
                   </div>
 
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Radar Evidence</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Reference context</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{ragEvidence.length ? `${ragEvidence.length} chunks retrieved` : "Waiting for context"}</h3>
                     <div className="mt-4 grid max-h-56 gap-2 overflow-y-auto text-xs text-[#b9cacb]">
                       {ragEvidence.slice(0, 4).map((evidence, index) => (
@@ -1158,7 +1302,7 @@ export default function Home() {
                   </div>
 
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Landing Zone</p>
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Your repository</p>
                     <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{repoUrl ? "GitHub repo ready" : "GitHub repo pending"}</h3>
                     {repoUrl ? (
                       <div className="mt-4 flex flex-wrap gap-2">
@@ -1199,8 +1343,8 @@ export default function Home() {
           </div>
 
           <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-xl">
-            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Person 1 Handoff</p>
-            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">Orchestrator contract</h2>
+            <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">How it works</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#dfe2ef]">What happens behind the scenes</h2>
             <div className="mt-3 space-y-2 text-sm leading-6 text-[#b9cacb]">
             <p>POST /api/orchestrator/start-project receives idea, optional references, repoPreference, repoName, repoDescription, repoUrl, and visibility.</p>
               <p>Backend returns task_id, then GET /agent/tasks/:id streams RAG evidence, tool calls, build logs, and final GitHub links.</p>

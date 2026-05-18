@@ -6,6 +6,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from agent.generated_project import build_project_artifacts
+from agent.project_depth import enrich_project_requirements
 from agent.idea_context import (
     extract_idea_from_prompt,
     extract_json_section,
@@ -32,7 +33,12 @@ from agent.model_outputs import (
     FinalReadmeOutput,
     MvpScopeOutput,
     PitchOutput,
+    RecommendedStackOutput,
     RepoPlanOutput,
+)
+from agent.stack_recommendation import (
+    align_architecture_plan_with_recommended_stack,
+    recommend_stack_heuristic,
 )
 
 
@@ -40,7 +46,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 
 
 class IdeaAwarePartialClient:
-    """Graceful degradation: idea-specific partial outputs, never a generic template."""
+    """Explicit degraded mode: project-specific outputs, never a generic template."""
 
     def __init__(self, *, partial_reason: str) -> None:
         self._partial_reason = partial_reason
@@ -59,8 +65,8 @@ class IdeaAwarePartialClient:
         started = perf_counter()
         idea = extract_idea_from_prompt(prompt)
         intake = extract_json_section(prompt, "Frontend intake:\n")
-        mvp_scope = extract_json_section(prompt, "MVP scope:\n")
-        repo_plan = extract_json_section(prompt, "Repo plan:\n")
+        project_requirements = extract_json_section(prompt, "Project requirements:\n") or extract_json_section(prompt, "MVP scope:\n")
+        architecture_plan = extract_json_section(prompt, "Architecture plan:\n") or extract_json_section(prompt, "Repo plan:\n")
         build_context = extract_json_section(prompt, "Structured build context:\n")
         resolved_stack = _resolved_stack_from_prompt(prompt, build_context)
 
@@ -68,8 +74,8 @@ class IdeaAwarePartialClient:
             purpose=purpose,
             idea=idea,
             intake=intake,
-            mvp_scope=mvp_scope,
-            repo_plan=repo_plan,
+            project_requirements=project_requirements,
+            architecture_plan=architecture_plan,
             build_context=build_context,
             resolved_stack=resolved_stack,
             prompt=prompt,
@@ -79,7 +85,7 @@ class IdeaAwarePartialClient:
             output=output,
             model=model,
             purpose=purpose,
-            mode="partial",
+            mode="degraded",
             latency_ms=max(0, round((perf_counter() - started) * 1000)),
             fallback_reason=self._partial_reason,
         )
@@ -90,67 +96,124 @@ class IdeaAwarePartialClient:
         purpose: str,
         idea: str,
         intake: dict,
-        mvp_scope: dict,
-        repo_plan: dict,
+        project_requirements: dict,
+        architecture_plan: dict,
         build_context: dict,
         resolved_stack: str,
         prompt: str,
     ) -> dict:
-        mode: ModelMode = "partial"
+        mode: ModelMode = "degraded"
         reason = self._partial_reason
-        features = features_from_context(idea=idea, intake=intake, mvp_scope=mvp_scope, repo_plan=repo_plan)
+        features = features_from_context(
+            idea=idea,
+            intake=intake,
+            mvp_scope=project_requirements,
+            repo_plan=architecture_plan,
+        )
         title = project_title_from_context(idea=idea, intake=intake)
         target_users = target_users_from_context(intake) or "users described in the submitted idea"
-        tech_stack = tech_stack_from_context(intake, repo_plan) or resolved_stack
+        tech_stack = tech_stack_from_context(intake, architecture_plan) or resolved_stack
 
-        if purpose == "scope_mvp":
-            return MvpScopeOutput(
-                target_user=target_users,
-                must_have=features,
-                demo_boundary=(
-                    f"One end-to-end MVP path for {title}, with labeled mock integrations "
-                    "only where APIs or credentials are unavailable."
-                ),
-                mode=mode,
-                decision_trace=_trace(
-                    mode,
-                    reason,
-                    [
-                        f"Partial generation for: {_idea_label(idea)}",
-                        "Scoped features from intake and plan because live Nemotron was unavailable.",
-                        "Kept scope specific to the submitted idea rather than a generic starter app.",
-                    ],
-                ),
-            ).model_dump()
-
-        if purpose == "plan_repo":
-            if not repo_plan:
-                return _repo_plan_payload(mode, reason, idea, prompt)
-            return RepoPlanOutput.model_validate(
+        if purpose in {"scope_mvp", "requirement_expansion"}:
+            requirements_payload = enrich_project_requirements(
                 {
-                    **repo_plan,
+                    "target_users": target_users,
+                    "core_features": features,
+                    "advanced_features": [
+                        "Authenticated workspace",
+                        "Operational dashboard",
+                        "Generated project evidence log",
+                    ],
+                    "success_criteria": [
+                        "Primary user can complete the end-to-end workflow.",
+                        "Generated repository includes source, tests, docs, and deployment notes.",
+                    ],
+                    "project_depth": intake.get("projectDepth") or "Advanced Project",
+                    "target_platform": intake.get("targetPlatform") or "web app",
                     "mode": mode,
                     "decision_trace": _trace(
                         mode,
                         reason,
                         [
-                            "Reused repository plan from earlier orchestration step.",
-                            f"Plan remains tied to {title}.",
+                            f"Explicit degraded generation for: {_idea_label(idea)}",
+                            "Expanded features from intake and plan because live Nemotron was unavailable.",
+                            "Kept requirements specific to the submitted idea rather than a generic starter app.",
                         ],
                     ),
-                }
-            ).model_dump()
+                },
+                idea=idea,
+                intake=intake,
+            )
+            requirements_payload["mode"] = mode
+            requirements_payload["decision_trace"] = _trace(
+                mode,
+                reason,
+                [
+                    f"Explicit degraded generation for: {_idea_label(idea)}",
+                    "Expanded features from intake and plan because live Nemotron was unavailable.",
+                    "Kept requirements specific to the submitted idea rather than a generic starter app.",
+                ],
+            )
+            return MvpScopeOutput.model_validate(requirements_payload).model_dump()
+
+        if purpose == "recommend_stack":
+            payload = recommend_stack_heuristic(
+                idea=idea,
+                project_requirements=project_requirements,
+                build_context=build_context if isinstance(build_context, dict) else {},
+            )
+            payload["mode"] = mode
+            payload["decision_trace"] = _trace(
+                mode,
+                reason,
+                [
+                    f"Explicit degraded stack recommendation for: {_idea_label(idea)}",
+                    "Selected project-specific technologies from idea and RAG hints.",
+                    "Did not default to MVPilot host stack.",
+                ],
+            )
+            return RecommendedStackOutput.model_validate(payload).model_dump()
+
+        if purpose in {"plan_repo", "architecture_plan"}:
+            if not architecture_plan:
+                plan_payload = _repo_plan_payload(mode, reason, idea, prompt)
+            else:
+                plan_payload = RepoPlanOutput.model_validate(
+                    {
+                        **architecture_plan,
+                        "mode": mode,
+                        "decision_trace": _trace(
+                            mode,
+                            reason,
+                            [
+                                "Reused repository plan from earlier orchestration step.",
+                                f"Plan remains tied to {title}.",
+                            ],
+                        ),
+                    }
+                ).model_dump()
+            recommended = (
+                build_context.get("recommendedStack")
+                if isinstance(build_context, dict)
+                else None
+            )
+            return align_architecture_plan_with_recommended_stack(
+                plan_payload,
+                recommended if isinstance(recommended, dict) else None,
+            )
 
         if purpose == "file_manifest":
+            requirements = enrich_project_requirements(project_requirements or {}, idea=idea, intake=intake)
             artifacts = build_project_artifacts(
                 idea=idea,
                 title=title,
                 resolved_stack=resolved_stack,
-                repo_plan=repo_plan or mvp_scope,
+                architecture_plan=architecture_plan or requirements,
                 source_warnings=_warnings_from_context(build_context),
                 target_users=target_users,
                 required_features=features,
                 tech_stack_preference=tech_stack,
+                project_requirements=requirements,
             )
             return FileManifestOutput(
                 artifacts=artifacts,
@@ -159,16 +222,16 @@ class IdeaAwarePartialClient:
                     mode,
                     reason,
                     [
-                        f"Generated idea-specific scaffold for {title} (partial mode).",
+                        f"Generated project-specific scaffold for {title} (degraded mode).",
                         f"Included {len(artifacts)} files aligned to the user's features.",
-                        "Mock data is labeled in code where external APIs are not wired.",
+                        "External integrations are documented where credentials are not configured.",
                     ],
                 ),
             ).model_dump()
 
         if purpose == "final_readme":
             return _final_readme_payload(mode, reason, idea, prompt)
-        if purpose == "demo_script":
+        if purpose in {"demo_script", "walkthrough"}:
             return _demo_script_payload(mode, reason, idea, prompt)
         if purpose == "pitch":
             return _pitch_payload(mode, reason, idea, prompt)
@@ -194,7 +257,14 @@ def _resolved_stack_from_prompt(prompt: str, build_context: dict) -> str:
             stack = [str(item).strip() for item in items if str(item).strip()]
             if stack:
                 return ", ".join(stack)
-    return "React, FastAPI, Postgres-ready schema, Pytest"
+    recommended = build_context.get("recommendedStack")
+    if isinstance(recommended, dict):
+        from agent.stack_recommendation import recommended_stack_summary
+
+        summary = recommended_stack_summary(recommended)
+        if summary:
+            return summary
+    return "Project-specific stack pending Stack Selector Agent"
 
 
 def _warnings_from_context(build_context: dict) -> list[dict[str, str]]:

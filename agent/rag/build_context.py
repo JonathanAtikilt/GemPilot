@@ -135,15 +135,15 @@ FALLBACK_BUILD_ITEMS: dict[BuildContextResponseCategory, tuple[str, ...]] = {
         "Final landing card shows repository, commit, build log, and architecture links",
     ),
     "requiredTechStackPieces": (
-        "Next.js + TypeScript + Tailwind frontend",
-        "Python 3.12 + FastAPI orchestrator backend",
-        "Supabase Postgres + pgvector RAG and memory store",
-        "NVIDIA Nemotron reasoning, embedding, and reranking models",
+        "Use sponsor-required technologies when RAG or rules mention them",
+        "Choose a project-specific stack; do not assume MVPilot's host stack",
+        "Document AI, database, auth, and deployment choices in README and architecture docs",
     ),
 }
 
 FALLBACK_SCOPE_WARNINGS: tuple[str, ...] = (
-    "No strong RAG evidence was retrieved; treat defaults as safe MVPilot assumptions.",
+    "No strong RAG evidence was retrieved; Stack Selector must infer a project-specific stack.",
+    "MVPilot host platform defaults are not the generated project stack.",
     "Never expose frontend-submitted or backend-owned secrets in generated files.",
 )
 
@@ -433,23 +433,19 @@ def _resolve_tech_stack(
     preferred_stack_items = _unique_strings(optional_params.stack if optional_params else [])
     explicit_items = [*required_stack_items, *preferred_stack_items]
 
-    default_items = [
-        item
-        for item in DEFAULT_TECH_STACK_ITEMS
-        if _should_add_default_stack_item(item=item, explicit_items=explicit_items)
-    ]
-    items = _unique_strings([*required_stack_items, *preferred_stack_items, *default_items])
+    host_platform_defaults = list(DEFAULT_TECH_STACK_ITEMS)
+    items = _unique_strings([*required_stack_items, *preferred_stack_items])
     source = _resolve_stack_source(
         has_required=bool(required_stack_items),
         has_preferences=bool(preferred_stack_items),
-        has_defaults=bool(default_items),
+        has_defaults=False,
     )
 
     return ResolvedTechStack(
         source=source,
         items=items,
         requiredItems=required_stack_items,
-        defaultItems=default_items,
+        defaultItems=host_platform_defaults,
         reason=_resolved_stack_reason(source),
     )
 
@@ -497,13 +493,14 @@ def _resolve_stack_source(
 
 def _resolved_stack_reason(source: ResolvedTechStackSource) -> str:
     reasons = {
-        "rag_required": "RAG required stack items covered the stack, so MVPilot defaults were not needed.",
-        "request_preference": "Request stack preferences covered the stack, so MVPilot defaults were not needed.",
-        "default": "No required or preferred stack was found, so MVPilot defaults were applied.",
-        "mixed": (
-            "Required or preferred stack items were kept, and MVPilot defaults filled "
-            "silent categories without overriding explicit choices."
+        "rag_required": "RAG required stack items; Stack Selector Agent will finalize the project stack.",
+        "request_preference": "User stack preferences captured; Stack Selector Agent will finalize the project stack.",
+        "default": (
+            "No RAG or user stack yet. Stack Selector Agent must recommend a project-specific stack "
+            "(MVPilot host defaults in defaultItems are not the generated project stack)."
         ),
+        "mixed": "RAG and user hints collected; Stack Selector Agent will produce the binding project stack.",
+        "stack_recommendation": "Binding stack from Stack Selector Agent for the generated project.",
     }
     return reasons[source]
 

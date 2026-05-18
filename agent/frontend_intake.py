@@ -58,6 +58,9 @@ class FrontendIntake(BaseModel):
     targetUsers: str | None = None
     techStackPreference: str | None = None
     requiredFeatures: list[str] = Field(default_factory=list)
+    projectDepth: str = "Advanced Project"
+    targetPlatform: str = "web app"
+    useOpenClawOrchestration: bool = True
 
     @field_validator(
         "title",
@@ -73,6 +76,8 @@ class FrontendIntake(BaseModel):
         "githubConnectionId",
         "targetUsers",
         "techStackPreference",
+        "projectDepth",
+        "targetPlatform",
         mode="before",
     )
     @classmethod
@@ -138,6 +143,9 @@ def build_frontend_intake_from_request(request: RunAgentRequest) -> FrontendInta
         targetUsers=request.target_users,
         techStackPreference=request.tech_stack_preference,
         requiredFeatures=list(request.required_features),
+        projectDepth=request.project_depth,
+        targetPlatform=request.target_platform,
+        useOpenClawOrchestration=request.use_openclaw_orchestration,
     )
 
 

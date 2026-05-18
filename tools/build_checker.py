@@ -10,7 +10,11 @@ from tools.schemas import RepoHealthResult, ToolResult
 
 README_FILES = ["README.md"]
 BUILD_LOG_FILES = ["docs/BUILD_LOG.md", "logs/build_log.md"]
-DEMO_SCRIPT_FILES = ["demo/demo_script.md", "demo_script.md"]
+DEMO_SCRIPT_FILES = [
+    "demo/demo_script.md",
+    "demo_script.md",
+    "docs/WALKTHROUGH.md",
+]
 ARCHITECTURE_FILES = ["docs/ARCHITECTURE.md"]
 PACKAGE_FILES = ["package.json", "requirements.txt"]
 SOURCE_PREFIXES = ["src/", "backend/"]

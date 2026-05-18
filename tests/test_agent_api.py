@@ -251,13 +251,15 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
         "package.json",
         "src/App.jsx",
         "backend/main.py",
-        "backend/mvp_engine.py",
+        "backend/models.py",
+        "backend/services.py",
         "tests/test_backend.py",
         "docs/ARCHITECTURE.md",
+        "docs/PROJECT_PLAN.md",
+        "docs/API_SPEC.md",
         "docs/BUILD_LOG.md",
         "docs/DATABASE_SCHEMA.sql",
-        "docs/IMPLEMENTATION_PLAN.md",
-        "demo/demo_script.md",
+        "docs/WALKTHROUGH.md",
         ".env.example",
         "final_report.json",
     }
@@ -271,8 +273,9 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
         "exchange_github_code",
         "retrieve_context",
         "scope_mvp",
-            "plan_repo",
-            "create_repo",
+        "recommend_stack",
+        "plan_repo",
+        "create_repo",
             "generate_files",
             "validate_mvp",
             "commit_progress",
@@ -289,12 +292,15 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     model_steps = [step for step in data["agent_steps"] if step["prompt_purpose"]]
     assert {step["prompt_purpose"] for step in model_steps} == {
         "scope_mvp",
+        "recommend_stack",
         "plan_repo",
         "file_manifest",
         "blocker_analysis",
         "final_package",
     }
-    assert all(step["model_mode"] == "partial" for step in model_steps)
+    assert all(
+        step["model_mode"] in {"mock", "partial", "degraded"} for step in model_steps
+    )
     assert "fake-nvidia-key" not in response.text
 
 

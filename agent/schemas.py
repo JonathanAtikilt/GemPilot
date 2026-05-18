@@ -106,6 +106,21 @@ class RunAgentRequest(BaseModel):
         default_factory=list,
         validation_alias=AliasChoices("required_features", "requiredFeatures"),
     )
+    project_depth: str = Field(
+        default="Advanced Project",
+        validation_alias=AliasChoices("project_depth", "projectDepth"),
+    )
+    target_platform: str = Field(
+        default="web app",
+        validation_alias=AliasChoices("target_platform", "targetPlatform"),
+    )
+    use_openclaw_orchestration: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "use_openclaw_orchestration",
+            "useOpenClawOrchestration",
+        ),
+    )
 
     @field_validator(
         "title",
@@ -120,6 +135,8 @@ class RunAgentRequest(BaseModel):
         "github_connection_id",
         "target_users",
         "tech_stack_preference",
+        "project_depth",
+        "target_platform",
         mode="before",
     )
     @classmethod
@@ -229,7 +246,7 @@ class AgentStep(BaseModel):
     message: str
     model: str | None = None
     prompt_purpose: str | None = None
-    model_mode: Literal["mock", "live", "partial"] | None = None
+    model_mode: Literal["mock", "live", "partial", "degraded"] | None = None
     decision_trace: list[str] = Field(default_factory=list)
     timestamp: datetime
 

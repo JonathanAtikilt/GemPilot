@@ -56,6 +56,9 @@ def test_frontend_intake_normalizes_request_fields() -> None:
         "targetUsers": None,
         "techStackPreference": None,
         "requiredFeatures": [],
+        "projectDepth": "Advanced Project",
+        "targetPlatform": "web app",
+        "useOpenClawOrchestration": True,
     }
 
 

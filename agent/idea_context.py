@@ -8,9 +8,9 @@ from typing import Any
 def extract_idea_from_prompt(prompt: str) -> str:
     marker = "Idea:\n"
     if marker not in prompt:
-        return _clean_text(prompt) or "the submitted MVP idea"
+        return _clean_text(prompt) or "the submitted project idea"
     value = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
-    return _clean_text(value) or "the submitted MVP idea"
+    return _clean_text(value) or "the submitted project idea"
 
 
 def extract_json_section(prompt: str, marker: str) -> dict[str, Any]:
@@ -45,7 +45,7 @@ def title_from_idea(idea: str) -> str:
             break
     if len(label) > 72:
         label = f"{label[:69].rstrip()}..."
-    return label[:1].upper() + label[1:] if label else "Submitted MVP"
+    return label[:1].upper() + label[1:] if label else "Submitted Project"
 
 
 def features_from_context(
@@ -76,7 +76,7 @@ def features_from_context(
         features = [
             f"Core workflow for: {title_from_idea(idea)}",
             "Idea-specific UI and API surface",
-            "Documented setup and demo path",
+            "Documented setup, architecture, testing, and deployment path",
         ]
     return features[:8]
 

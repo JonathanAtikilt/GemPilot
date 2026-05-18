@@ -15,6 +15,7 @@ from agent.schemas import (
     TaskStatus,
     TaskDetailResponse,
 )
+from agent.project_session_store import SupabasePersistingTaskStore
 from agent.task_store import InMemoryTaskStore
 from agent.frontend_intake import build_frontend_intake_from_task
 from agent.github_oauth import GitHubConnectionService
@@ -24,7 +25,7 @@ from agent.workflow import build_initial_state, build_workflow
 class AgentService:
     def __init__(
         self,
-        task_store: InMemoryTaskStore,
+        task_store: InMemoryTaskStore | SupabasePersistingTaskStore,
         settings: Settings,
         *,
         github_connections: GitHubConnectionService | None = None,

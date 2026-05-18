@@ -7,9 +7,10 @@ def test_orchestrator_initial_timeline_has_enriched_phases(monkeypatch) -> None:
     monkeypatch.delenv("OPENCLAW_API_KEY", raising=False)
     orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
     extras = orchestrator.initial_state_extras()
-    assert len(extras["build_timeline"]) == 11
-    assert extras["build_timeline"][0]["id"] == "understand_idea"
-    assert extras["build_timeline"][-2]["id"] == "validate_output"
+    assert len(extras["build_timeline"]) == 21
+    assert extras["build_timeline"][0]["id"] == "idea_intake"
+    assert extras["build_timeline"][-1]["id"] == "final_project_report"
+    assert extras["project_agents"]
     assert extras["runtime"] == "langgraph"
 
 
@@ -18,14 +19,14 @@ def test_orchestrator_records_completed_phase() -> None:
     state = {"build_timeline": default_build_timeline()}
     update = orchestrator.record_phase(
         state,
-        phase_id="extract_requirements",
+        phase_id="requirement_expansion",
         status="completed",
-        detail="Scoped MVP",
+        detail="Scoped project requirements",
         artifacts=["feature-a"],
     )
-    planned = next(item for item in update["build_timeline"] if item["id"] == "extract_requirements")
+    planned = next(item for item in update["build_timeline"] if item["id"] == "requirement_expansion")
     assert planned["status"] == "completed"
-    assert planned["detail"] == "Scoped MVP"
+    assert planned["detail"] == "Scoped project requirements"
     assert planned["artifacts"] == ["feature-a"]
 
 

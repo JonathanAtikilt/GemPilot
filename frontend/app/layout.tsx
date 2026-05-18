@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MVPilot",
-  description: "Generate idea-specific MVP repositories with Nemotron and OpenClaw orchestration.",
+  title: "NemoPilot — AI project builder",
+  description:
+    "Describe your software idea, connect GitHub, and let Nemotron agents plan, build, and export a full project repository.",
 };
 
 export default function RootLayout({
