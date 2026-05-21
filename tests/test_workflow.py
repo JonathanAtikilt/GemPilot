@@ -171,6 +171,7 @@ async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_sear
         "create_repo",
         "generate_files",
         "validate_mvp",
+        "debug_generated_files",
         "commit_progress",
         "verify_build",
         "handle_blocker",

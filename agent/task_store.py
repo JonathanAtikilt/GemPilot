@@ -160,6 +160,31 @@ class InMemoryTaskStore:
 
         return updated_detail.model_copy(deep=True)
 
+    async def append_agent_steps(
+        self,
+        task_id: str,
+        steps: list[Any],
+    ) -> TaskDetailResponse:
+        now = self._now()
+
+        async with self._lock:
+            current = self._tasks.get(task_id)
+            if current is None:
+                raise TaskNotFoundError(task_id)
+
+            updated_task = current.task.model_copy(update={"updated_at": now})
+            updated_detail = current.model_copy(
+                update={
+                    "task": updated_task,
+                    "agent_steps": [*current.agent_steps, *steps],
+                    "graph_trace": [*current.graph_trace, *steps],
+                },
+                deep=True,
+            )
+            self._tasks = {**self._tasks, task_id: updated_detail}
+
+        return updated_detail.model_copy(deep=True)
+
     async def seed_pending_approval(
         self,
         *,

@@ -39,6 +39,10 @@ def test_hydrate_file_manifest_fills_scaffold_from_nemotron_outline() -> None:
     assert "StudyPilot" in readme["content"]
     assert any(item["name"] == "backend/main.py" for item in artifacts)
 
+    package_json = next(artifact for artifact in artifacts if artifact["name"] == "package.json")
+    assert '"vite": "^6.0.0"' in package_json["content"]
+    assert '"@vitejs/plugin-react": "^4.3.4"' in package_json["content"]
+
 
 def test_merge_with_project_artifacts_keeps_model_files() -> None:
     merged = merge_with_project_artifacts(

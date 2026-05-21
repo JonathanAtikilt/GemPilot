@@ -104,6 +104,7 @@ NODE_FLIGHT_STAGE: dict[str, str] = {
     "create_repo": "autopilot",
     "generate_files": "autopilot",
     "validate_mvp": "autopilot",
+    "debug_generated_files": "autopilot",
     "commit_progress": "autopilot",
     "verify_build": "autopilot",
     "handle_blocker": "autopilot",
@@ -122,6 +123,7 @@ NODE_AGENT: dict[str, str] = {
     "create_repo": "github",
     "generate_files": "orchestrator",
     "validate_mvp": "orchestrator",
+    "debug_generated_files": "orchestrator",
     "commit_progress": "github",
     "verify_build": "github",
     "handle_blocker": "orchestrator",
@@ -1006,6 +1008,36 @@ def build_workflow(
             update["failure_reason"] = message
         return update
 
+    def debug_generated_files(state: WorkflowState) -> dict[str, Any]:
+        debug_report = _debug_generated_artifacts(state["generated_artifacts"])
+        debug_artifact = {
+            "name": "docs/DEBUG_REPORT.md",
+            "kind": "markdown",
+            "mock_mode": False,
+            "summary": "Pre-commit debug report for generated files.",
+            "content": debug_report["content"],
+        }
+        issue_count = len(debug_report["issues"])
+        warning_count = len(debug_report["warnings"])
+        return {
+            **append_step(
+                state=state,
+                node_name="debug_generated_files",
+                status="completed",
+                message=(
+                    "Ran pre-commit generated-file debug checks."
+                    if issue_count == 0
+                    else "Ran pre-commit generated-file debug checks with issues."
+                ),
+                decision_trace=[
+                    f"Checked {len(state['generated_artifacts'])} generated artifact(s).",
+                    f"Found {issue_count} issue(s) and {warning_count} warning(s).",
+                    "Added docs/DEBUG_REPORT.md to make the debug pass visible in the repo.",
+                ],
+            ),
+            "generated_artifacts": [*state["generated_artifacts"], debug_artifact],
+        }
+
     def commit_progress(state: WorkflowState) -> dict[str, Any]:
         repo_name = state.get("repo", {}).get("name") or f"mvpilot-generated-{state['task_id'][:8]}"
         files = _files_from_generated_artifacts(state["generated_artifacts"])
@@ -1393,6 +1425,7 @@ def build_workflow(
     graph.add_node("create_repo", create_repo)
     graph.add_node("generate_files", generate_files)
     graph.add_node("validate_mvp", validate_mvp)
+    graph.add_node("debug_generated_files", debug_generated_files)
     graph.add_node("commit_progress", commit_progress)
     graph.add_node("verify_build", verify_build)
     graph.add_node("handle_blocker", handle_blocker)
@@ -1427,10 +1460,11 @@ def build_workflow(
         "validate_mvp",
         route_after_validate_mvp,
         {
-            "commit_progress": "commit_progress",
+            "debug_generated_files": "debug_generated_files",
             "failed": "failed",
         },
     )
+    graph.add_edge("debug_generated_files", "commit_progress")
     graph.add_conditional_edges(
         "commit_progress",
         route_after_commit_progress,
@@ -1542,6 +1576,153 @@ def _files_from_generated_artifacts(artifacts: list[dict[str, Any]]) -> list[dic
     return files
 
 
+def _debug_generated_artifacts(artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    files = _files_from_generated_artifacts(artifacts)
+    paths = {file["path"] for file in files}
+    content_by_path = {file["path"]: file["content"] for file in files}
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    required_paths = ["README.md", "docs/ARCHITECTURE.md"]
+    for path in required_paths:
+        if path not in paths:
+            issues.append(f"Missing required file: `{path}`.")
+    if not any(path in paths for path in ("demo/demo_script.md", "docs/WALKTHROUGH.md")):
+        issues.append(
+            "Missing walkthrough file: `demo/demo_script.md` or `docs/WALKTHROUGH.md`."
+        )
+
+    if not any(path in paths for path in ("package.json", "requirements.txt")):
+        issues.append("Missing a runnable dependency manifest: `package.json` or `requirements.txt`.")
+    if not any(path.startswith(("src/", "backend/")) for path in paths):
+        issues.append("Missing application source under `src/` or `backend/`.")
+    if "package.json" in paths and not any(path.startswith("src/") for path in paths):
+        warnings.append("`package.json` exists, but no frontend `src/` files were generated.")
+    if "requirements.txt" in paths and not any(path.startswith("backend/") for path in paths):
+        warnings.append("`requirements.txt` exists, but no `backend/` files were generated.")
+
+    for path, content in content_by_path.items():
+        if not content.strip():
+            issues.append(f"Empty generated file: `{path}`.")
+        if path.split("/")[-1] == ".env":
+            issues.append(f"Unsafe real env file was generated: `{path}`.")
+        if "TODO: implement" in content or "placeholder" in content.lower():
+            warnings.append(f"Possible placeholder content in `{path}`.")
+        if path == "package.json":
+            try:
+                package_json = json.loads(content)
+            except json.JSONDecodeError:
+                issues.append("`package.json` is not valid JSON.")
+            else:
+                package_issues, package_warnings = _debug_frontend_dependencies(
+                    package_json
+                )
+                issues.extend(package_issues)
+                warnings.extend(package_warnings)
+
+    status = "passed" if not issues else "needs attention"
+    lines = [
+        "# Debug Report",
+        "",
+        f"Status: {status}",
+        f"Files checked: {len(files)}",
+        f"Issues: {len(issues)}",
+        f"Warnings: {len(warnings)}",
+        "",
+        "## Issues",
+        "",
+        *(f"- {issue}" for issue in issues),
+        *(["- None"] if not issues else []),
+        "",
+        "## Warnings",
+        "",
+        *(f"- {warning}" for warning in warnings),
+        *(["- None"] if not warnings else []),
+        "",
+        "## Checked Files",
+        "",
+        *(f"- `{path}`" for path in sorted(paths)),
+        "",
+    ]
+    return {
+        "status": status,
+        "issues": issues,
+        "warnings": warnings,
+        "content": "\n".join(lines),
+    }
+
+
+def _debug_frontend_dependencies(package_json: Any) -> tuple[list[str], list[str]]:
+    if not isinstance(package_json, dict):
+        return ["`package.json` must be a JSON object."], []
+
+    deps = package_json.get("dependencies")
+    dev_deps = package_json.get("devDependencies")
+    all_deps: dict[str, str] = {}
+    for section in (deps, dev_deps):
+        if isinstance(section, dict):
+            all_deps.update(
+                {
+                    str(name): str(version)
+                    for name, version in section.items()
+                    if isinstance(name, str)
+                }
+            )
+
+    issues: list[str] = []
+    warnings: list[str] = []
+    minimum_majors = {
+        "vite": 8,
+        "@vitejs/plugin-react": 6,
+        "react": 19,
+        "react-dom": 19,
+    }
+    for package_name, minimum_major in minimum_majors.items():
+        version = all_deps.get(package_name)
+        if version is None:
+            if package_name in {"vite", "react", "react-dom"}:
+                issues.append(f"Missing frontend dependency `{package_name}`.")
+            else:
+                warnings.append(f"Missing frontend helper dependency `{package_name}`.")
+            continue
+        major = _major_version(version)
+        if major is None:
+            warnings.append(
+                f"Could not verify `{package_name}` version `{version}`."
+            )
+            continue
+        if major < minimum_major:
+            issues.append(
+                f"`{package_name}` is pinned to `{version}`; expected major {minimum_major} or newer."
+            )
+
+    react_version = all_deps.get("react")
+    react_dom_version = all_deps.get("react-dom")
+    if react_version and react_dom_version and react_version != react_dom_version:
+        warnings.append(
+            f"`react` ({react_version}) and `react-dom` ({react_dom_version}) should match."
+        )
+
+    if "vite" in all_deps and "@vitejs/plugin-react" in all_deps:
+        vite_major = _major_version(all_deps["vite"])
+        plugin_major = _major_version(all_deps["@vitejs/plugin-react"])
+        if vite_major is not None and plugin_major is not None:
+            if vite_major >= 8 and plugin_major < 6:
+                issues.append(
+                    "Vite 8 generated apps should use `@vitejs/plugin-react` major 6 or newer."
+                )
+
+    return issues, warnings
+
+
+def _major_version(version: str) -> int | None:
+    cleaned = version.strip()
+    for prefix in ("^", "~", ">=", "<=", ">", "<", "="):
+        cleaned = cleaned.removeprefix(prefix).strip()
+    first = cleaned.split(".", 1)[0]
+    return int(first) if first.isdigit() else None
+
+
 def _last_tool_call(state: WorkflowState, tool_name: str) -> dict[str, Any]:
     for call in reversed(state.get("tool_calls", [])):
         raw_result = call.get("raw_result") if isinstance(call, dict) else None
@@ -1589,7 +1770,7 @@ def route_after_validate_mvp(state: dict[str, Any]) -> str:
     validation = state.get("mvp_validation") or {}
     if validation.get("passed") is False:
         return "failed"
-    return "commit_progress"
+    return "debug_generated_files"
 
 
 def route_after_commit_progress(state: dict[str, Any]) -> str:

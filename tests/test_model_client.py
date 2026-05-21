@@ -165,7 +165,7 @@ async def test_deterministic_mock_stays_explicitly_in_test_mode():
 
 
 @pytest.mark.asyncio
-async def test_nemotron_client_posts_guided_json_and_parses_completion():
+async def test_nemotron_client_posts_schema_prompt_and_parses_completion():
     settings = live_settings()
     content = _sample_project_requirements(
         target_users="clinic referral coordinator",
@@ -200,6 +200,7 @@ async def test_nemotron_client_posts_guided_json_and_parses_completion():
     assert posted["stream"] is False
     assert posted["guided_json"]["title"] == "ProjectRequirementsOutput"
     assert posted["messages"][0]["role"] == "system"
+    assert "guided schema" in posted["messages"][0]["content"]
     assert posted["messages"][1]["content"] == "Scope this MVP."
     assert posted["reasoning_effort"] == "none"
     assert result.mode == "live"
