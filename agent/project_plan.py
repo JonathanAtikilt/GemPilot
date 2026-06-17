@@ -65,7 +65,11 @@ def _infer_excluded_features(
         excluded.append("Generic operational dashboard")
     if "marketplace" not in corpus and profile.category != "marketplace":
         excluded.append("Two-sided marketplace listings")
-    return _unique(excluded)
+    return [
+        item
+        for item in _unique(excluded)
+        if item.lower() not in required_corpus
+    ]
 
 
 def _unique(values: list[str]) -> list[str]:

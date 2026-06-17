@@ -7,27 +7,37 @@ from typing import Any
 
 from agent.project_classifier import ProjectProfile
 
-# Universal artifacts every generated repo should include regardless of stack.
-UNIVERSAL_PATHS: frozenset[str] = frozenset(
+# Core docs every generated repo should include.
+CORE_UNIVERSAL_PATHS: frozenset[str] = frozenset(
     {
         "README.md",
         "docs/PROJECT_PLAN.md",
         "docs/ARCHITECTURE.md",
         "docs/DEPLOY.md",
         "docs/TESTING_STRATEGY.md",
+    }
+)
+
+# Optional hackathon/demo artifacts — only when is_hackathon_mode=True.
+HACKATHON_PATHS: frozenset[str] = frozenset(
+    {
         "demo/script.md",
         "demo/storyboard.md",
         "demo/demo_walkthrough.md",
         "demo/video_outline.md",
+        "demo/voiceover.md",
+        "demo/demo_script.md",
+        "docs/HACKATHON_SUBMISSION.md",
     }
 )
 
-# Gap-fill only — never overwrite LLM-generated implementation files with scaffold.
-GAP_FILL_PATHS: frozenset[str] = UNIVERSAL_PATHS | frozenset(
+# Backward-compatible alias.
+UNIVERSAL_PATHS: frozenset[str] = CORE_UNIVERSAL_PATHS | HACKATHON_PATHS
+
+GAP_FILL_PATHS: frozenset[str] = CORE_UNIVERSAL_PATHS | frozenset(
     {
         "docs/API_SPEC.md",
         "docs/KNOWN_LIMITATIONS.md",
-        "docs/HACKATHON_SUBMISSION.md",
         ".env.example",
     }
 )
@@ -578,7 +588,11 @@ def get_gap_fill_paths(
     architecture_plan: dict[str, Any] | None,
     *,
     target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> frozenset[str]:
     """Paths safe to gap-fill from scaffold without overwriting architecture."""
     del architecture_plan, target_platform
-    return GAP_FILL_PATHS
+    paths = set(GAP_FILL_PATHS)
+    if is_hackathon_mode:
+        paths.update(HACKATHON_PATHS)
+    return frozenset(paths)

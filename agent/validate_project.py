@@ -62,13 +62,28 @@ def _filter_legacy_checks(
     *,
     plan: ProjectPlan | None = None,
     project_requirements: dict[str, Any] | None = None,
+    intake: dict[str, Any] | None = None,
     require_live_manifest: bool = False,
 ) -> dict[str, Any]:
     vp = arch_plan.validation_profile
+    req = project_requirements or {}
+    intake = intake or {}
+    is_hackathon_mode = bool(
+        req.get("is_hackathon_mode") or req.get("demo_mode") or intake.get("demo_mode")
+    )
     checks = []
     for item in validation.get("checks") or []:
         name = str(item.get("name") or "")
         if name == "studypilot_benchmark_complete":
+            continue
+        if name in {"demo_materials_generated", "readme_setup_features_demo"} and not is_hackathon_mode:
+            checks.append(
+                {
+                    **item,
+                    "passed": True,
+                    "detail": "Skipped — hackathon demo files are optional unless demo mode is enabled.",
+                }
+            )
             continue
         if name in {"ui_specific", "frontend_routes_or_pages_exist"} and not vp.get(
             "check_frontend_routes", profile.frontend_required
@@ -144,11 +159,11 @@ def _filter_legacy_checks(
         "no_generic_fallback_features",
         "generated_files_not_placeholders",
         "imports_resolve",
-        "readme_setup_features_demo",
-        "demo_materials_generated",
         "user_flow_defined",
         "testing_and_deployment_present",
     }
+    if is_hackathon_mode:
+        still_critical.update({"readme_setup_features_demo", "demo_materials_generated"})
     if profile.frontend_required and vp.get("check_frontend_routes"):
         still_critical.add("ui_specific")
     if profile.backend_required and vp.get("check_backend_routes"):
@@ -266,6 +281,7 @@ def validate_project(
         plan=plan,
         require_live_manifest=require_live_manifest,
         project_requirements=merged_requirements,
+        intake=intake,
     )
     plan_checks = _plan_checks(
         plan=plan,
