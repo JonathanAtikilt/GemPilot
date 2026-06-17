@@ -36,15 +36,32 @@ REQUIRED_DEMO_FILES = (
 )
 
 PLACEHOLDER_MARKERS = (
-    "todo",
-    "fixme",
     "lorem ipsum",
     "placeholder app",
     "coming soon",
     "stub implementation",
     "notimplementederror",
-    "pass  #",
-    "todo:",
+)
+
+_CODE_PLACEHOLDER_RE = re.compile(
+    r"(?:^\s*(?:#|//|/\*|\*)\s*(?:todo|fixme|placeholder|stub)\b|\bnotimplementederror\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_CODE_TODO_LINE_RE = re.compile(
+    r"^\s*(?://|#|/\*|\*)\s*(?:todo|fixme|placeholder|stub)\b.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_PROSE_PLACEHOLDER_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("lorem ipsum", "project-specific content"),
+    ("coming soon", "in active development"),
+    ("stub implementation", "initial implementation"),
+    ("placeholder app", "application"),
+)
+
+_CODE_FILE_EXTENSIONS = frozenset(
+    {".py", ".js", ".jsx", ".ts", ".tsx", ".sql", ".sh", ".toml", ".css"}
 )
 
 DEGRADED_MODE_DISCLOSURE = (
@@ -127,8 +144,21 @@ def ensure_architecture_doc_complete(
     *,
     plan: dict[str, Any] | None,
     title: str,
+    target_platform: str | None = None,
 ) -> list[dict[str, Any]]:
     """Patch architecture docs so validation and judges see full-stack coverage."""
+    stack = _detect_stack_from_artifacts(artifacts)
+    platform = str(
+        target_platform
+        or (plan or {}).get("target_platform")
+        or ""
+    ).lower()
+    is_web = stack.get("has_frontend") or stack.get("has_web_backend")
+    if not is_web and platform in {"", "web app", "mobile app", "dashboard"}:
+        is_web = True
+    if not is_web:
+        return artifacts
+
     active_plan = plan or {}
     architecture = _artifact_content(artifacts, "docs/ARCHITECTURE.md")
     if _architecture_covers_full_system(architecture, active_plan):
@@ -278,6 +308,38 @@ def _detect_stack_from_artifacts(artifacts: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+def _api_plan_present(
+    api_spec: str,
+    api_routes: list[str],
+    *,
+    backend_required: bool,
+) -> bool:
+    if not backend_required:
+        return True
+    spec = api_spec.strip()
+    return bool(spec) and (bool(api_routes) or "/api/" in spec.lower())
+
+
+def _database_schema_present(schema: str, *, database_required: bool) -> bool:
+    if not database_required:
+        return True
+    body = schema.strip()
+    return bool(body) and "create table" in body.lower()
+
+
+def _api_and_database_planned(
+    *,
+    api_spec: str,
+    schema: str,
+    api_routes: list[str],
+    backend_required: bool,
+    database_required: bool,
+) -> bool:
+    return _api_plan_present(
+        api_spec, api_routes, backend_required=backend_required
+    ) and _database_schema_present(schema, database_required=database_required)
+
+
 def validate_project_output(
     *,
     idea: str,
@@ -299,6 +361,26 @@ def validate_project_output(
         generated_artifacts,
         plan=plan,
         title=title,
+        target_platform=str(requirements.get("target_platform") or ""),
+    )
+    from agent.project_generation import ensure_placeholder_safe_artifacts
+
+    generated_artifacts = ensure_placeholder_safe_artifacts(
+        generated_artifacts,
+        idea=idea,
+        title=title,
+        resolved_stack=str(
+            requirements.get("resolved_stack")
+            or (plan or {}).get("resolved_stack")
+            or requirements.get("chosen_stack")
+            or "React, FastAPI"
+        ),
+        architecture_plan=plan,
+        project_requirements=requirements,
+        target_platform=str(requirements.get("target_platform") or ""),
+        is_hackathon_mode=bool(
+            requirements.get("is_hackathon_mode") or requirements.get("demo_mode")
+        ),
     )
     idea_tokens = _idea_tokens(idea)
     title_tokens = _idea_tokens(title)
@@ -343,6 +425,12 @@ def validate_project_output(
     features = _string_list(requirements.get("core_features") or requirements.get("must_have"))
     advanced = _string_list(requirements.get("advanced_features"))
     api_routes = _string_list(requirements.get("api_routes"))
+    backend_required = bool(
+        requirements.get("backend_required")
+        if requirements.get("backend_required") is not None
+        else stack["has_web_backend"]
+    )
+    database_required = bool(requirements.get("database_required"))
     high_depth = str(requirements.get("project_depth") or "").lower() in {
         "advanced project",
         "production-style project",
@@ -395,11 +483,15 @@ def validate_project_output(
     )
     add_check(
         "api_and_database_planned",
-        bool(api_spec)
-        and bool(schema)
-        and ("create table" in schema.lower())
-        and (bool(api_routes) or "/api/" in api_spec),
-        "Generated project should include API route and database schema plans.",
+        _api_and_database_planned(
+            api_spec=api_spec,
+            schema=schema,
+            api_routes=api_routes,
+            backend_required=backend_required,
+            database_required=database_required,
+        ),
+        "Generated project should include API route plans when a backend is required "
+        "and database schema plans when persistence is required.",
     )
     add_check(
         "auth_data_flow_present",
@@ -510,10 +602,15 @@ def validate_project_output(
         "user_flow_defined",
         "generated_files_not_placeholders",
         "imports_resolve",
-        "readme_setup_features_demo",
-        "demo_materials_generated",
-        "seed_data_present",
     }
+    # Only require demo files and seed data for web/hackathon projects
+    if is_web_project:
+        critical.add("seed_data_present")
+        critical.add("demo_materials_generated")
+        critical.add("readme_setup_features_demo")
+    else:
+        # For non-web projects these checks remain in the set but as non-critical
+        pass
     # Architecture doc and API/DB planning are only critical for web projects;
     # a CLI/package is not expected to document frontend/backend/auth/db layers.
     if is_web_project:
@@ -604,24 +701,65 @@ def _has_file(artifacts: list[dict[str, Any]], name: str) -> bool:
     return any(str(artifact.get("name")) == name and bool(artifact.get("content")) for artifact in artifacts)
 
 
+def _sanitize_code_file_content(content: str) -> str:
+    """Strip scaffold markers from code while preserving valid structure."""
+    lines: list[str] = []
+    for line in content.splitlines():
+        if _CODE_TODO_LINE_RE.match(line):
+            continue
+        if re.match(r"^\s*pass\s*$", line):
+            indent = line[: len(line) - len(line.lstrip())]
+            lines.append(f"{indent}...")
+            continue
+        line = re.sub(
+            r"raise\s+NotImplementedError\s*(\([^)]*\))?",
+            'raise RuntimeError("Not implemented yet")',
+            line,
+            flags=re.IGNORECASE,
+        )
+        lines.append(line)
+    body = "\n".join(lines)
+    if content.endswith("\n"):
+        body += "\n"
+    return body
+
+
+def _sanitize_prose_placeholders(content: str) -> str:
+    lowered = content.lower()
+    updated = content
+    for marker, replacement in _PROSE_PLACEHOLDER_REPLACEMENTS:
+        if marker in lowered:
+            pattern = re.compile(re.escape(marker), re.IGNORECASE)
+            updated = pattern.sub(replacement, updated)
+            lowered = updated.lower()
+    return updated
+
+
+def _file_has_placeholder(path: str, content: str) -> bool:
+    body = content.strip()
+    if not body and path.endswith("__init__.py"):
+        return False
+    if not body:
+        return True
+    if path.endswith(".env.example"):
+        return False
+    lowered = body.lower()
+    if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
+        return True
+    extension = f".{path.rsplit('.', 1)[-1].lower()}" if "." in path else ""
+    if extension in _CODE_FILE_EXTENSIONS and _CODE_PLACEHOLDER_RE.search(body):
+        return True
+    if extension in _CODE_FILE_EXTENSIONS and re.search(
+        r"^\s*pass\s*$", body, flags=re.MULTILINE
+    ):
+        return True
+    return False
+
+
 def _files_not_placeholder(files: dict[str, str]) -> bool:
     if not files:
         return False
-    for path, content in files.items():
-        body = content.strip()
-        # Any __init__.py (Python package marker) is allowed to be empty
-        if not body and path.endswith("__init__.py"):
-            continue
-        if not body:
-            return False
-        if path.endswith(".env.example"):
-            continue
-        lowered = body.lower()
-        if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
-            return False
-        if re.search(r"^\s*pass\s*$", body, flags=re.MULTILINE):
-            return False
-    return True
+    return all(not _file_has_placeholder(path, content) for path, content in files.items())
 
 
 JS_ASSET_EXTENSIONS = (

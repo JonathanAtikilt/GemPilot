@@ -55,8 +55,22 @@ from agent.idea_context import (
     tech_stack_from_context,
 )
 from agent.mvp_depth import enrich_mvp_scope
-from agent.mvp_validation import build_delivery_report, validate_mvp_output
-from agent.project_validation import ensure_architecture_doc_complete, ensure_degraded_mode_documented
+from agent.mvp_validation import build_delivery_report
+from agent.validate_project import validate_project
+from agent.project_classifier import (
+    apply_profile_to_requirements,
+    classify_for_generation,
+    classify_project,
+)
+from agent.project_plan import build_project_plan
+from agent.generation_logging import (
+    log_architecture,
+    log_classification,
+    log_features,
+    log_repairs,
+)
+from agent.architecture_planner import architecture_plan_to_repo_plan, plan_architecture
+from agent.project_validation import ensure_architecture_doc_complete
 from agent.orchestrator import Orchestrator, _planned_file_path
 from agent.orchestration_pipeline import (
     API_DESIGN,
@@ -86,7 +100,11 @@ from agent.orchestration_pipeline import (
 )
 from agent.project_generation import (
     artifact_groups,
+    ensure_api_database_plans,
+    ensure_frontend_reflects_project,
     ensure_imports_resolve,
+    ensure_placeholder_safe_artifacts,
+    generate_project_artifacts,
     hydrate_file_manifest,
     merge_scaffold_over_model,
 )
@@ -601,6 +619,28 @@ def build_workflow(
             idea=state["idea"],
             intake=state.get("frontend_intake"),
         )
+        profile = classify_project(
+            state["idea"],
+            intake=state.get("frontend_intake"),
+            requirements=scope,
+        )
+        scope = apply_profile_to_requirements(scope, profile)
+        classification = classify_for_generation(
+            state["idea"],
+            intake=state.get("frontend_intake"),
+            requirements=scope,
+        )
+        log_classification(classification.to_dict(), idea=state["idea"])
+        log_features(
+            required=list(scope.get("core_features") or []),
+            excluded=[],
+        )
+        adaptive_plan = build_project_plan(
+            idea=state["idea"],
+            intake=state.get("frontend_intake"),
+            scope=scope,
+            recommended_stack=state.get("recommended_stack"),
+        )
         project_plan = orchestrator.compose_project_plan(
             idea=state["idea"],
             intake=state.get("frontend_intake"),
@@ -618,7 +658,7 @@ def build_workflow(
             ),
             "mvp_scope": scope,
             "mvp_plan": project_plan,
-            "project_plan": project_plan,
+            "project_plan": adaptive_plan.to_dict(),
             "model_modes": [result.mode],
             **record_phases(
                 state,
@@ -727,6 +767,31 @@ def build_workflow(
             result.output.model_dump(),
             state.get("recommended_stack"),
         )
+        profile = classify_project(
+            state["idea"],
+            intake=state.get("frontend_intake"),
+            requirements=state.get("mvp_scope") or {},
+        )
+        adaptive_plan = plan_architecture(
+            profile,
+            idea=state["idea"],
+            recommended_stack=state.get("recommended_stack"),
+            requirements=state.get("mvp_scope"),
+            existing_plan=plan,
+        )
+        plan = {**plan, **architecture_plan_to_repo_plan(adaptive_plan)}
+        log_architecture(plan, project_type=profile.category)
+        composed_plan = build_project_plan(
+            idea=state["idea"],
+            intake=state.get("frontend_intake"),
+            scope=state.get("mvp_scope") or {},
+            recommended_stack=state.get("recommended_stack"),
+            existing_repo_plan=plan,
+        )
+        log_features(
+            required=composed_plan.required_features,
+            excluded=composed_plan.excluded_features,
+        )
         project_plan = orchestrator.compose_project_plan(
             idea=state["idea"],
             intake=state.get("frontend_intake"),
@@ -790,7 +855,7 @@ def build_workflow(
             ),
             "repo_plan": plan,
             "mvp_plan": project_plan,
-            "project_plan": project_plan,
+            "project_plan": composed_plan.to_dict(),
             "model_modes": [result.mode],
             **timeline_updates,
         }
@@ -866,56 +931,34 @@ def build_workflow(
         recommended_stack = state.get("recommended_stack") or {}
         build_context = state.get("build_context", {})
 
-        # Resolve stack dict for prompt context
+        # Resolve stack dict for prompt context (use recommended stack when present)
         stack: dict[str, Any] = {
-            "frontend": recommended_stack.get("frontend", "React + Vite + Tailwind CSS"),
-            "backend": recommended_stack.get("backend", "FastAPI + Python 3.12"),
-            "database": recommended_stack.get("database", "SQLite (dev) / PostgreSQL (prod)"),
-            "authentication": recommended_stack.get("authentication", "JWT"),
-            "deployment": recommended_stack.get("deployment", "Vercel + Railway"),
-            "testing": recommended_stack.get("testing", "pytest + Vitest"),
+            "frontend": recommended_stack.get("frontend") or "Next.js with React and TypeScript",
+            "backend": recommended_stack.get("backend") or "FastAPI with Python",
+            "database": recommended_stack.get("database") or "SQLite (dev) / PostgreSQL (prod)",
+            "authentication": recommended_stack.get("authentication") or "JWT or session auth",
+            "deployment": recommended_stack.get("deployment") or "Static hosting + managed API",
+            "testing": recommended_stack.get("testing") or "pytest + Vitest",
         }
-
-        raw_artifacts, overall_mode, gen_traces = await run_staged_generation(
-            model_client=active_model_client,
-            settings=settings,
-            idea=state["idea"],
-            product_brief=mvp_scope,
-            stack=stack,
-            architecture=repo_plan,
-        )
-
-        if not raw_artifacts:
-            if settings.strict_live_file_generation:
-                raise RuntimeError(
-                    "Staged LLM generation produced no files. Live-only mode is enabled."
-                )
-            # Graceful fallback: use the old template-based generation
-            intake = state.get("frontend_intake") or build_context.get("frontendIntake", {})
-            raw_artifacts = hydrate_file_manifest(
-                [],
-                idea=state["idea"],
-                title=project_title_from_context(idea=state["idea"], intake=intake),
-                resolved_stack=_resolved_stack_summary(build_context),
-                architecture_plan=repo_plan,
-                source_warnings=_source_warnings(build_context),
-                target_users=target_users_from_context(intake),
-                required_features=features_from_context(
-                    idea=state["idea"],
-                    intake=intake,
-                    mvp_scope=mvp_scope,
-                    repo_plan=repo_plan,
-                ),
-                tech_stack_preference=tech_stack_from_context(intake, repo_plan),
-                project_requirements=mvp_scope,
-            )
-            overall_mode = "degraded"
-            gen_traces.append("Fell back to template generation — staged LLM generation produced no files.")
-
-        if not raw_artifacts:
-            raise RuntimeError("generate_files: no artifacts produced by staged or fallback generation.")
+        if recommended_stack.get("frontend"):
+            stack["frontend"] = recommended_stack["frontend"]
+        if recommended_stack.get("backend"):
+            stack["backend"] = recommended_stack["backend"]
+        if recommended_stack.get("database"):
+            stack["database"] = recommended_stack["database"]
+        if recommended_stack.get("authentication"):
+            stack["authentication"] = recommended_stack["authentication"]
+        if recommended_stack.get("deployment"):
+            stack["deployment"] = recommended_stack["deployment"]
+        if recommended_stack.get("testing"):
+            stack["testing"] = recommended_stack["testing"]
 
         intake = state.get("frontend_intake") or build_context.get("frontendIntake", {})
+        product_brief = {
+            **mvp_scope,
+            "demo_mode": bool(state.get("demo_mode")),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
+        }
         generation_kwargs = {
             "idea": state["idea"],
             "title": project_title_from_context(idea=state["idea"], intake=intake),
@@ -930,21 +973,60 @@ def build_workflow(
                 repo_plan=repo_plan,
             ),
             "tech_stack_preference": tech_stack_from_context(intake, repo_plan),
-            "project_requirements": mvp_scope,
+            "project_requirements": product_brief,
+            "target_platform": product_brief.get("target_platform")
+            or intake.get("targetPlatform")
+            or intake.get("target_platform"),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
         }
+
+        raw_artifacts, overall_mode, gen_traces = await run_staged_generation(
+            model_client=active_model_client,
+            settings=settings,
+            idea=state["idea"],
+            product_brief=product_brief,
+            stack=stack,
+            architecture=repo_plan,
+        )
+
+        if not raw_artifacts:
+            raw_artifacts = generate_project_artifacts(**generation_kwargs)
+            overall_mode = "degraded"
+            gen_traces.append(
+                "Staged LLM generation returned no files; used classification-driven project generator scaffold."
+            )
+
+        if not raw_artifacts:
+            raise RuntimeError(
+                "Staged generation produced no files after retry/simplify attempts."
+            )
+
         if overall_mode == "live":
             raw_artifacts = hydrate_file_manifest(raw_artifacts, **generation_kwargs)
-            gen_traces.append("Filled any missing required demo, seed, docs, or route artifacts without replacing live file bodies.")
+            gen_traces.append(
+                "Gap-filled missing universal docs/demo paths without replacing live implementations."
+            )
         else:
-            if settings.strict_live_file_generation:
-                raise RuntimeError(
-                    f"Staged generation returned mode={overall_mode}. Live-only mode is enabled."
-                )
             raw_artifacts = merge_scaffold_over_model(raw_artifacts, **generation_kwargs)
-            gen_traces.append("Used the complete local full-stack project generator for non-live stage output.")
+            gen_traces.append(
+                "Merged non-live stage output with profile-aware implementation scaffold (mock/test path)."
+            )
 
+        before_names = {a["name"] for a in raw_artifacts}
         raw_artifacts = ensure_imports_resolve(raw_artifacts, **generation_kwargs)
-        gen_traces.append("Normalized local Python and frontend imports against the generated repository.")
+        raw_artifacts = ensure_frontend_reflects_project(raw_artifacts, **generation_kwargs)
+        raw_artifacts = ensure_api_database_plans(raw_artifacts, **generation_kwargs)
+        raw_artifacts = ensure_placeholder_safe_artifacts(raw_artifacts, **generation_kwargs)
+        after_names = {a["name"] for a in raw_artifacts}
+        repairs = sorted(after_names - before_names)
+        log_repairs(repairs=repairs)
+        gen_traces.append("Repaired imports against the generated architecture without template overwrite.")
+        gen_traces.append(
+            "Ensured frontend references the submitted idea and planned product flows when LLM UI was generic."
+        )
+        gen_traces.append(
+            "Ensured API and database planning docs align with classified backend/database requirements."
+        )
 
         groups = artifact_groups(raw_artifacts)
         artifacts = [
@@ -1013,17 +1095,13 @@ def build_workflow(
 
     def validate_mvp(state: WorkflowState) -> dict[str, Any]:
         frontend_intake = state.get("frontend_intake") or {}
-        original_modes = list(state.get("model_modes") or [])
-        modes = original_modes[:]
         enriched_scope = enrich_mvp_scope(
             state.get("mvp_scope") or {},
             idea=state["idea"],
             intake=frontend_intake,
         )
-        artifacts = ensure_degraded_mode_documented(
-            list(state.get("generated_artifacts", [])),
-            modes,
-        )
+        modes = list(state.get("model_modes") or [])
+        artifacts = list(state.get("generated_artifacts", []))
         artifacts = ensure_architecture_doc_complete(
             artifacts,
             plan=state.get("repo_plan") or {},
@@ -1049,16 +1127,56 @@ def build_workflow(
             tech_stack_preference=tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
             project_requirements=enriched_scope,
         )
-        validation = validate_mvp_output(
+        artifacts = ensure_api_database_plans(
+            artifacts,
+            idea=state["idea"],
+            title=project_title_from_context(idea=state["idea"], intake=frontend_intake),
+            resolved_stack=_resolved_stack_summary(state.get("build_context") or {}),
+            architecture_plan=state.get("repo_plan") or {},
+            source_warnings=_source_warnings(state.get("build_context") or {}),
+            target_users=target_users_from_context(frontend_intake),
+            required_features=features_from_context(
+                idea=state["idea"],
+                intake=frontend_intake,
+                mvp_scope=enriched_scope,
+                repo_plan=state.get("repo_plan") or {},
+            ),
+            tech_stack_preference=tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
+            project_requirements=enriched_scope,
+            target_platform=enriched_scope.get("target_platform"),
+            is_hackathon_mode=bool(state.get("demo_mode")),
+        )
+        placeholder_kwargs = {
+            "idea": state["idea"],
+            "title": project_title_from_context(idea=state["idea"], intake=frontend_intake),
+            "resolved_stack": _resolved_stack_summary(state.get("build_context") or {}),
+            "architecture_plan": state.get("repo_plan") or {},
+            "source_warnings": _source_warnings(state.get("build_context") or {}),
+            "target_users": target_users_from_context(frontend_intake),
+            "required_features": features_from_context(
+                idea=state["idea"],
+                intake=frontend_intake,
+                mvp_scope=enriched_scope,
+                repo_plan=state.get("repo_plan") or {},
+            ),
+            "tech_stack_preference": tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
+            "project_requirements": enriched_scope,
+            "target_platform": enriched_scope.get("target_platform"),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
+        }
+        artifacts = ensure_placeholder_safe_artifacts(artifacts, **placeholder_kwargs)
+        validation = validate_project(
             idea=state["idea"],
             intake=frontend_intake,
-            mvp_scope=enriched_scope,
-            repo_plan=state.get("repo_plan"),
+            project_plan=state.get("project_plan"),
             generated_artifacts=artifacts,
             model_modes=modes,
-            require_live_manifest=settings.workflow_live_manifest_only,
-            manifest_model_mode=state.get("file_manifest_mode"),
-            allow_degraded_manifest=settings.allow_idea_aware_partial,
+            project_requirements={
+                **enriched_scope,
+                "demo_mode": state.get("demo_mode"),
+                "is_hackathon_mode": bool(state.get("demo_mode")),
+            },
+            architecture_plan=state.get("repo_plan") or {},
         )
 
         delivery = build_delivery_report(
@@ -1097,7 +1215,7 @@ def build_workflow(
             "mvp_validation": validation,
             "mvp_delivery": delivery,
             "generated_artifacts": artifacts,
-            "model_modes": [mode for mode in modes if mode not in original_modes],
+            "model_modes": modes,
             **orchestrator.record_phase(
                 state,
                 phase_id=TESTING_STRATEGY,

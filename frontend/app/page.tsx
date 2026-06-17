@@ -177,9 +177,16 @@ type AdditionalSource =
 
 const BRAND_NAME = "GemPilot";
 
-const defaultTitle = "";
-const defaultIdea = "";
-/** Optional product/rules URL prefilled for localhost demo; clear the field to skip RAG fetch. */
+const defaultTitle = "StudyPilot";
+const defaultIdea =
+  "A web app that helps students track study sessions, manage tasks, and visualize weekly progress. " +
+  "Users can log study time per subject, set daily goals, and see streaks and charts on a personal dashboard.";
+const defaultTargetUsers = "University students managing multiple courses";
+const defaultTechStack = "React + TypeScript frontend, FastAPI backend, PostgreSQL database";
+const defaultFeatures =
+  "User authentication, dashboard with study stats, create/edit/delete tasks, " +
+  "study session timer, weekly progress charts, dark mode";
+/** Optional product/rules URL; leave blank to skip RAG context fetch. */
 const defaultReferenceUrl = "";
 
 const flightStops: AgentStep[] = [
@@ -379,9 +386,9 @@ function deriveFlightStageState(taskDetail: TaskDetail | null, hasLaunched: bool
 export default function Home() {
   const [projectTitle, setProjectTitle] = useState(defaultTitle);
   const [idea, setIdea] = useState(defaultIdea);
-  const [targetUsers, setTargetUsers] = useState("");
-  const [techStackPreference, setTechStackPreference] = useState("");
-  const [requiredFeatures, setRequiredFeatures] = useState("");
+  const [targetUsers, setTargetUsers] = useState(defaultTargetUsers);
+  const [techStackPreference, setTechStackPreference] = useState(defaultTechStack);
+  const [requiredFeatures, setRequiredFeatures] = useState(defaultFeatures);
   const [projectDepth, setProjectDepth] = useState<ProjectDepth>("Advanced Project");
   const [targetPlatform, setTargetPlatform] = useState("web app");
   const [useRuntimeOrchestration, setUseRuntimeOrchestration] = useState(true);
@@ -392,7 +399,7 @@ export default function Home() {
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
   const [repoPreference, setRepoPreference] = useState<RepoPreference>("create_new_repo");
-  const [requestedRepoName, setRequestedRepoName] = useState("");
+  const [requestedRepoName, setRequestedRepoName] = useState("gempilot-studypilot");
   const [existingRepoUrl, setExistingRepoUrl] = useState("");
   const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);

@@ -32,6 +32,221 @@ from agent.prompts import (
 
 logger = logging.getLogger(__name__)
 
+_STANDARD_STAGES = ("database", "backend", "frontend", "docs", "demo")
+_BACKEND_STAGE_HINTS = frozenset(
+    {
+        "backend",
+        "cli_core",
+        "commands",
+        "analytics_api",
+        "extension_core",
+        "content_scripts",
+        "game_server",
+        "api",
+    }
+)
+_FRONTEND_STAGE_HINTS = frozenset(
+    {
+        "frontend",
+        "static_site",
+        "content_sections",
+        "popup_ui",
+        "game_client",
+    }
+)
+_DATABASE_STAGE_HINTS = frozenset({"database"})
+_CODE_GEN_PURPOSES = frozenset(
+    {
+        "generate_database",
+        "generate_backend",
+        "generate_frontend",
+        "generate_docs",
+        "generate_demo_video",
+    }
+)
+
+_STAGE_EXACT_PATHS: dict[str, frozenset[str]] = {
+    "generate_database": frozenset(
+        {
+            "backend/db.py",
+            "backend/models.py",
+            "docs/DATABASE_SCHEMA.sql",
+            "scripts/seed_data.py",
+            "data/seed.json",
+        }
+    ),
+    "generate_backend": frozenset(
+        {
+            "backend/main.py",
+            "backend/services.py",
+            "backend/__init__.py",
+            "requirements.txt",
+            "tests/test_backend.py",
+            "tests/test_api.py",
+            "docs/API_SPEC.md",
+        }
+    ),
+    "generate_frontend": frozenset(
+        {
+            "package.json",
+            "index.html",
+            "App.tsx",
+            "index.js",
+            "src/main.jsx",
+            "src/App.jsx",
+            "src/lib/api.js",
+            "src/state/projectState.js",
+            "src/styles.css",
+            "frontend/index.html",
+            "frontend/src/main.js",
+            "frontend/src/styles.css",
+        }
+    ),
+    "generate_docs": frozenset(
+        {
+            "README.md",
+            "docs/PROJECT_PLAN.md",
+            "docs/ARCHITECTURE.md",
+            "docs/TESTING_STRATEGY.md",
+            "docs/DEPLOY.md",
+            "docs/AGENT_LOG.md",
+            "docs/BUILD_LOG.md",
+            "docs/KNOWN_LIMITATIONS.md",
+            "docs/WALKTHROUGH.md",
+            ".env.example",
+        }
+    ),
+    "generate_demo_video": frozenset(
+        {
+            "demo/script.md",
+            "demo/storyboard.md",
+            "demo/demo_walkthrough.md",
+            "demo/video_outline.md",
+            "demo/voiceover.md",
+            "demo/demo_script.md",
+            "docs/HACKATHON_SUBMISSION.md",
+        }
+    ),
+}
+
+
+def project_generator_stage_batch(
+    *,
+    purpose: str,
+    idea: str,
+    title: str | None,
+    resolved_stack: str,
+    architecture_plan: dict[str, Any] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+    target_users: str | None = None,
+    required_features: list[str] | None = None,
+    tech_stack_preference: str | None = None,
+    project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
+    mode: str = "degraded",
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Return a stage file batch from the classification-driven project generator."""
+    from agent.generated_project import build_project_artifacts
+    from agent.model_outputs import GeneratedFileBatchOutput, GeneratedFileWithContent
+
+    if purpose not in _CODE_GEN_PURPOSES:
+        raise ValueError(f"Unsupported code generation purpose: {purpose}")
+
+    artifacts = build_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        architecture_plan=architecture_plan,
+        source_warnings=source_warnings,
+        target_users=target_users,
+        required_features=required_features,
+        tech_stack_preference=tech_stack_preference,
+        project_requirements=project_requirements,
+        target_platform=target_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
+    exact = _STAGE_EXACT_PATHS.get(purpose, frozenset())
+    selected = [
+        artifact
+        for artifact in artifacts
+        if artifact["name"] in exact
+        or (
+            purpose == "generate_backend"
+            and artifact["name"].startswith("cli/")
+        )
+        or (
+            purpose == "generate_frontend"
+            and (
+                artifact["name"].startswith("extension/")
+                or artifact["name"] in {"manifest.json", "background.js", "popup.html", "popup.js", "content.js"}
+            )
+        )
+    ]
+    if not selected and purpose == "generate_docs":
+        selected = [artifact for artifact in artifacts if artifact["name"] == "README.md"]
+    files = [
+        GeneratedFileWithContent(
+            name=str(artifact["name"]),
+            kind=str(artifact.get("kind") or "code"),
+            summary=str(artifact.get("summary") or "Generated from classified project plan."),
+            content=str(artifact.get("content") or ""),
+        )
+        for artifact in selected
+        if str(artifact.get("content") or "").strip()
+    ]
+    stage_key = purpose.replace("generate_", "")
+    trace_reason = fallback_reason or "Used classification-driven project generator output for this stage."
+    return GeneratedFileBatchOutput(
+        stage=stage_key,
+        files=files,
+        mode=mode,  # type: ignore[arg-type]
+        decision_trace=[
+            f"{purpose}: emitted {len(files)} file(s) from classified project generator.",
+            trace_reason,
+        ],
+    ).model_dump()
+
+
+def _generation_stages(
+    architecture: dict[str, Any],
+    product_brief: dict[str, Any],
+) -> tuple[str, ...]:
+    """Return LLM generation stages appropriate for the classified architecture."""
+    validation = architecture.get("validation_profile") or {}
+    impl = [
+        str(stage).lower()
+        for stage in (architecture.get("implementation_stages") or [])
+    ]
+
+    if impl:
+        include_db = any(stage in _DATABASE_STAGE_HINTS for stage in impl)
+        include_backend = any(stage in _BACKEND_STAGE_HINTS for stage in impl)
+        include_frontend = any(stage in _FRONTEND_STAGE_HINTS for stage in impl)
+    else:
+        include_db = bool(
+            validation.get("check_database_models", product_brief.get("database_required", True))
+        )
+        include_backend = bool(
+            validation.get("check_backend_routes", product_brief.get("backend_required", True))
+        )
+        include_frontend = bool(
+            validation.get("check_frontend_routes", product_brief.get("frontend_required", True))
+        )
+
+    stages: list[str] = []
+    if include_db:
+        stages.append("database")
+    if include_backend:
+        stages.append("backend")
+    if include_frontend:
+        stages.append("frontend")
+    stages.append("docs")
+    if product_brief.get("is_hackathon_mode") or product_brief.get("demo_mode"):
+        stages.append("demo")
+    return tuple(stages or ("docs",))
+
 
 async def run_staged_generation(
     *,
@@ -42,7 +257,62 @@ async def run_staged_generation(
     stack: dict[str, Any],
     architecture: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str, list[str]]:
-    """Run the 5-stage code-generation pipeline.
+    """Run profile-aware staged generation with retry and architecture simplification."""
+    attempts: list[tuple[str, dict[str, Any]]] = [
+        ("full", architecture),
+        ("simplified", _simplify_architecture(architecture)),
+        ("minimal", _simplify_architecture(architecture, minimal=True)),
+    ]
+    last_mode = "degraded"
+    last_traces: list[str] = []
+    last_artifacts: list[dict[str, Any]] = []
+
+    for attempt_name, arch in attempts:
+        artifacts, mode, traces = await _run_staged_generation_once(
+            model_client=model_client,
+            settings=settings,
+            idea=idea,
+            product_brief=product_brief,
+            stack=stack,
+            architecture=arch,
+        )
+        last_artifacts, last_mode, last_traces = artifacts, mode, traces
+        traces.insert(0, f"generation_attempt={attempt_name} files={len(artifacts)} mode={mode}")
+        if artifacts:
+            return artifacts, mode, traces
+    return last_artifacts, last_mode, last_traces
+
+
+def _simplify_architecture(architecture: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+    simplified = dict(architecture)
+    stages = [
+        str(stage)
+        for stage in (architecture.get("implementation_stages") or [])
+        if str(stage).strip()
+    ]
+    if minimal:
+        keep = {"docs", "demo", "cli_core", "commands", "api_core", "routes", "static_site"}
+        simplified["implementation_stages"] = [s for s in stages if s in keep] or ["docs", "demo"]
+    else:
+        drop = {"database", "frontend", "analytics_api", "popup_ui", "content_scripts"}
+        simplified["implementation_stages"] = [s for s in stages if s not in drop] or stages
+    profile = dict(simplified.get("validation_profile") or {})
+    profile["check_database_models"] = False if not minimal else profile.get("check_database_models", False)
+    profile["check_frontend_routes"] = False if minimal else profile.get("check_frontend_routes", True)
+    simplified["validation_profile"] = profile
+    return simplified
+
+
+async def _run_staged_generation_once(
+    *,
+    model_client: "ModelClient",
+    settings: "Settings",
+    idea: str,
+    product_brief: dict[str, Any],
+    stack: dict[str, Any],
+    architecture: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    """Run profile-aware staged code generation.
 
     Returns
     -------
@@ -54,110 +324,95 @@ async def run_staged_generation(
     decision_traces : list[str]
         Aggregated decision-trace lines from all stages.
     """
-    by_name: dict[str, dict[str, Any]] = {}  # name → artifact; last write wins
+    by_name: dict[str, dict[str, Any]] = {}
     overall_mode = "live"
     all_traces: list[str] = []
+    stages = _generation_stages(architecture, product_brief)
+    all_traces.append(f"Generation stages selected: {', '.join(stages)}")
 
-    # ── Stage 1 : Database ────────────────────────────────────────────────────
-    db_files, db_mode, db_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_database",
-        prompt=build_database_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-        ),
-    )
-    _merge(by_name, db_files)
-    all_traces.extend(db_traces)
-    if db_mode != "live":
-        overall_mode = db_mode
+    stage_counts: dict[str, int] = {stage: 0 for stage in stages}
 
-    # ── Stage 2 : Backend ─────────────────────────────────────────────────────
-    backend_files, backend_mode, backend_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_backend",
-        prompt=build_backend_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            db_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, backend_files)
-    all_traces.extend(backend_traces)
-    if backend_mode != "live":
-        overall_mode = backend_mode
+    for stage in stages:
+        if stage == "database":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_database",
+                prompt=build_database_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                ),
+            )
+        elif stage == "backend":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_backend",
+                prompt=build_backend_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    db_file_names=list(by_name.keys()),
+                ),
+            )
+        elif stage == "frontend":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_frontend",
+                prompt=build_frontend_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    backend_routes=(
+                        product_brief.get("api_routes")
+                        or architecture.get("api_design")
+                        or []
+                    ),
+                    data_entities=product_brief.get("data_entities"),
+                ),
+            )
+        elif stage == "docs":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_docs",
+                prompt=build_docs_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    generated_file_names=list(by_name.keys()),
+                ),
+            )
+        else:
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_demo_video",
+                prompt=build_demo_video_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    generated_file_names=list(by_name.keys()),
+                ),
+            )
 
-    # ── Stage 3 : Frontend ────────────────────────────────────────────────────
-    frontend_files, frontend_mode, frontend_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_frontend",
-        prompt=build_frontend_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            backend_routes=(
-                product_brief.get("api_routes")
-                or architecture.get("api_design")
-                or []
-            ),
-            data_entities=product_brief.get("data_entities"),
-        ),
-    )
-    _merge(by_name, frontend_files)
-    all_traces.extend(frontend_traces)
-    if frontend_mode != "live":
-        overall_mode = frontend_mode
-
-    # ── Stage 4 : Documentation ───────────────────────────────────────────────
-    docs_files, docs_mode, docs_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_docs",
-        prompt=build_docs_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            generated_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, docs_files)
-    all_traces.extend(docs_traces)
-    if docs_mode != "live":
-        overall_mode = docs_mode
-
-    # ── Stage 5 : Demo Video Materials ────────────────────────────────────────
-    demo_files, demo_mode, demo_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_demo_video",
-        prompt=build_demo_video_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            generated_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, demo_files)
-    all_traces.extend(demo_traces)
-    if demo_mode != "live":
-        overall_mode = demo_mode
+        _merge(by_name, files)
+        all_traces.extend(traces)
+        stage_counts[stage] = len(files)
+        if mode != "live":
+            overall_mode = mode
 
     artifacts = [by_name[name] for name in sorted(by_name)]
+    counts = ", ".join(f"{stage}={stage_counts.get(stage, 0)}" for stage in stages)
     all_traces.append(
-        f"Staged generation complete: {len(artifacts)} files across 5 stages "
-        f"(db={len(db_files)}, backend={len(backend_files)}, "
-        f"frontend={len(frontend_files)}, docs={len(docs_files)}, "
-        f"demo_video={len(demo_files)})."
+        f"Staged generation complete: {len(artifacts)} files across {len(stages)} stages ({counts})."
     )
     return artifacts, overall_mode, all_traces
 

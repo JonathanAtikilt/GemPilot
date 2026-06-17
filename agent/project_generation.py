@@ -7,11 +7,12 @@ import re
 from typing import Any
 
 from agent.generated_project import build_project_artifacts, merge_with_project_artifacts
+from agent.architecture_planner import get_gap_fill_paths
 
 logger = logging.getLogger(__name__)
 
 
-PROJECT_PRIORITY_PATHS = frozenset(
+_WEB_PRIORITY_PATHS: frozenset[str] = frozenset(
     {
         "README.md",
         "src/App.jsx",
@@ -19,6 +20,10 @@ PROJECT_PRIORITY_PATHS = frozenset(
         "src/styles.css",
         "src/lib/api.js",
         "src/state/projectState.js",
+        "frontend/src/App.jsx",
+        "frontend/src/main.jsx",
+        "frontend/src/lib/api.js",
+        "frontend/src/state/projectState.js",
         "backend/main.py",
         "backend/db.py",
         "backend/models.py",
@@ -40,6 +45,51 @@ PROJECT_PRIORITY_PATHS = frozenset(
         "demo/demo_script.md",
     }
 )
+
+_CLI_PRIORITY_PATHS: frozenset[str] = frozenset(
+    {
+        "cli/main.py",
+        "cli/__init__.py",
+        "pyproject.toml",
+        "requirements.txt",
+    }
+)
+
+_EXTENSION_PRIORITY_PATHS: frozenset[str] = frozenset(
+    {
+        "manifest.json",
+        "background.js",
+        "popup.html",
+        "popup.js",
+        "content.js",
+    }
+)
+
+_API_PRIORITY_PATHS: frozenset[str] = frozenset(
+    {
+        "backend/main.py",
+        "backend/models.py",
+        "backend/services.py",
+        "backend/db.py",
+        "requirements.txt",
+    }
+)
+
+
+def get_priority_paths(target_platform: str | None = None) -> frozenset[str]:
+    """Return scaffold paths that should be kept for the given platform."""
+    platform = (target_platform or "web app").lower().strip()
+    if platform in ("cli", "cli tool", "terminal", "command line"):
+        return _CLI_PRIORITY_PATHS
+    if platform in ("browser extension", "extension", "chrome extension"):
+        return _EXTENSION_PRIORITY_PATHS
+    if platform in ("api", "api only", "api service", "backend only"):
+        return _API_PRIORITY_PATHS
+    return _WEB_PRIORITY_PATHS
+
+
+# Keep PROJECT_PRIORITY_PATHS as the default (web) for backward compatibility.
+PROJECT_PRIORITY_PATHS = _WEB_PRIORITY_PATHS
 
 
 PACKAGE_INIT_PATHS = ("backend/__init__.py", "src/__init__.py", "tests/__init__.py")
@@ -389,6 +439,8 @@ def ensure_imports_resolve(
     required_features: list[str] | None = None,
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Repair generated code imports without forcing a fixed template structure.
 
@@ -519,6 +571,234 @@ def ensure_imports_resolve(
     return as_sorted(by_name)
 
 
+def ensure_frontend_reflects_project(
+    artifacts: list[dict[str, Any]],
+    *,
+    idea: str,
+    title: str | None,
+    resolved_stack: str,
+    architecture_plan: dict[str, Any] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+    target_users: str | None = None,
+    required_features: list[str] | None = None,
+    tech_stack_preference: str | None = None,
+    project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
+) -> list[dict[str, Any]]:
+    """Replace generic LLM frontends with classification-driven product UI when needed."""
+    from agent.project_validation import (
+        _detect_stack_from_artifacts,
+        _frontend_pages_exist,
+        _idea_tokens,
+        _looks_generic,
+        _text_reflects_idea,
+    )
+
+    stack = _detect_stack_from_artifacts(artifacts)
+    if not stack.get("has_frontend"):
+        return artifacts
+
+    by_name: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        name = str(artifact.get("name") or "").strip()
+        if name:
+            by_name[name] = artifact
+
+    files = {path: str(item.get("content") or "") for path, item in by_name.items()}
+    app_path = stack.get("app_source_path") or "src/App.jsx"
+    app_source = files.get(app_path, "")
+    tokens = _idea_tokens(idea)
+    ui_ok = (
+        bool(app_source)
+        and _text_reflects_idea(app_source, tokens)
+        and not _looks_generic(app_source)
+        and _frontend_pages_exist(app_source, files)
+    )
+    if ui_ok:
+        return artifacts
+
+    resolved_platform = target_platform or (project_requirements or {}).get("target_platform")
+    overlay_paths = {
+        path
+        for path in get_priority_paths(resolved_platform)
+        if path.startswith(("src/", "frontend/src/"))
+        and path.endswith((".jsx", ".js", ".css"))
+    }
+    scaffold = generate_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        architecture_plan=architecture_plan,
+        source_warnings=source_warnings,
+        target_users=target_users,
+        required_features=required_features,
+        tech_stack_preference=tech_stack_preference,
+        project_requirements=project_requirements,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
+    for artifact in scaffold:
+        name = str(artifact.get("name") or "").strip()
+        if name in overlay_paths:
+            by_name[name] = artifact
+
+    return [by_name[path] for path in sorted(by_name)]
+
+
+def ensure_api_database_plans(
+    artifacts: list[dict[str, Any]],
+    *,
+    idea: str,
+    title: str | None,
+    resolved_stack: str,
+    architecture_plan: dict[str, Any] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+    target_users: str | None = None,
+    required_features: list[str] | None = None,
+    tech_stack_preference: str | None = None,
+    project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
+) -> list[dict[str, Any]]:
+    """Ensure API spec and database schema docs match classified backend/database needs."""
+    from agent.project_classifier import classify_project
+    from agent.project_validation import (
+        _api_and_database_planned,
+        _api_plan_present,
+        _database_schema_present,
+    )
+
+    requirements = dict(project_requirements or {})
+    profile = classify_project(idea, requirements=requirements)
+    backend_required = bool(requirements.get("backend_required", profile.backend_required))
+    database_required = bool(requirements.get("database_required", profile.database_required))
+    if not backend_required and not database_required:
+        return artifacts
+
+    by_name: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        name = str(artifact.get("name") or "").strip()
+        if name:
+            by_name[name] = artifact
+
+    files = {path: str(item.get("content") or "") for path, item in by_name.items()}
+    api_routes = [
+        str(route).strip()
+        for route in (requirements.get("api_routes") or [])
+        if str(route).strip()
+    ]
+    api_spec = files.get("docs/API_SPEC.md", "")
+    schema = files.get("docs/DATABASE_SCHEMA.sql", "")
+    if _api_and_database_planned(
+        api_spec=api_spec,
+        schema=schema,
+        api_routes=api_routes,
+        backend_required=backend_required,
+        database_required=database_required,
+    ):
+        return artifacts
+
+    resolved_platform = target_platform or requirements.get("target_platform")
+    scaffold = generate_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        architecture_plan=architecture_plan,
+        source_warnings=source_warnings,
+        target_users=target_users,
+        required_features=required_features,
+        tech_stack_preference=tech_stack_preference,
+        project_requirements=requirements,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
+    scaffold_by_name = {str(item["name"]): item for item in scaffold}
+    if backend_required and not _api_plan_present(api_spec, api_routes, backend_required=True):
+        if "docs/API_SPEC.md" in scaffold_by_name:
+            by_name["docs/API_SPEC.md"] = scaffold_by_name["docs/API_SPEC.md"]
+    if database_required and not _database_schema_present(schema, database_required=True):
+        for path in ("docs/DATABASE_SCHEMA.sql", "backend/db.py", "scripts/seed_data.py", "data/seed.json"):
+            if path in scaffold_by_name:
+                by_name[path] = scaffold_by_name[path]
+
+    return [by_name[path] for path in sorted(by_name)]
+
+
+def ensure_placeholder_safe_artifacts(
+    artifacts: list[dict[str, Any]],
+    *,
+    idea: str | None = None,
+    title: str | None = None,
+    resolved_stack: str | None = None,
+    architecture_plan: dict[str, Any] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+    target_users: str | None = None,
+    required_features: list[str] | None = None,
+    tech_stack_preference: str | None = None,
+    project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
+) -> list[dict[str, Any]]:
+    """Sanitize placeholder/TODO/stub markers and overlay scaffold files when needed."""
+    from agent.project_validation import (
+        _CODE_FILE_EXTENSIONS,
+        _file_has_placeholder,
+        _sanitize_code_file_content,
+        _sanitize_prose_placeholders,
+    )
+
+    scaffold_by_name: dict[str, dict[str, Any]] = {}
+    if idea and resolved_stack:
+        scaffold_by_name = {
+            str(item["name"]): item
+            for item in generate_project_artifacts(
+                idea=idea,
+                title=title,
+                resolved_stack=resolved_stack,
+                architecture_plan=architecture_plan,
+                source_warnings=source_warnings,
+                target_users=target_users,
+                required_features=required_features,
+                tech_stack_preference=tech_stack_preference,
+                project_requirements=project_requirements,
+                target_platform=target_platform,
+                is_hackathon_mode=is_hackathon_mode,
+            )
+        }
+
+    cleaned: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        item = dict(artifact)
+        name = str(item.get("name") or "").strip()
+        if not name or name.endswith("/"):
+            cleaned.append(item)
+            continue
+        content = item.get("content")
+        if not isinstance(content, str):
+            cleaned.append(item)
+            continue
+
+        extension = f".{name.rsplit('.', 1)[-1].lower()}" if "." in name else ""
+        if extension in _CODE_FILE_EXTENSIONS:
+            content = _sanitize_code_file_content(content)
+        else:
+            content = _sanitize_prose_placeholders(content)
+
+        if _file_has_placeholder(name, content) and name in scaffold_by_name:
+            replacement = str(scaffold_by_name[name].get("content") or "")
+            if replacement.strip():
+                content = replacement
+
+        if not content.strip() and name in scaffold_by_name:
+            content = str(scaffold_by_name[name].get("content") or "")
+
+        item["content"] = content
+        cleaned.append(item)
+
+    return cleaned
+
+
 def generate_project_artifacts(
     *,
     idea: str,
@@ -530,6 +810,8 @@ def generate_project_artifacts(
     required_features: list[str] | None = None,
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, str]]:
     return build_project_artifacts(
         idea=idea,
@@ -541,6 +823,8 @@ def generate_project_artifacts(
         required_features=required_features,
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
+        target_platform=target_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
 
 
@@ -556,8 +840,24 @@ def merge_scaffold_over_model(
     required_features: list[str] | None = None,
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
-    """Prefer validated full-project files over incomplete model fragments."""
+    """Overlay profile-aware implementation files for non-live stage output (mock/test paths).
+
+    Live LLM output uses ``hydrate_file_manifest`` only. This path replaces thin mock-stage
+    files so deterministic tests complete without injecting templates on generation failure.
+    """
+
+    resolved_platform = target_platform or (
+        (project_requirements or {}).get("target_platform")
+    )
+    priority_paths = get_priority_paths(resolved_platform)
+    gap_paths = get_gap_fill_paths(
+        architecture_plan,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
 
     scaffold = generate_project_artifacts(
         idea=idea,
@@ -569,6 +869,8 @@ def merge_scaffold_over_model(
         required_features=required_features,
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
     by_name: dict[str, dict[str, Any]] = {}
     for artifact in artifacts:
@@ -579,8 +881,16 @@ def merge_scaffold_over_model(
         name = str(artifact.get("name") or "").strip()
         if not name:
             continue
-        if name in PROJECT_PRIORITY_PATHS or name not in by_name:
+        if name not in by_name:
             by_name[name] = artifact
+            continue
+        if name in priority_paths:
+            by_name[name] = artifact
+        elif name in gap_paths:
+            existing = str(by_name[name].get("content") or "")
+            replacement = str(artifact.get("content") or "")
+            if len(replacement) > len(existing):
+                by_name[name] = artifact
     return [by_name[path] for path in sorted(by_name)]
 
 
@@ -620,10 +930,21 @@ def hydrate_file_manifest(
     required_features: list[str] | None = None,
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
-    """Merge model manifest metadata with complete full-project file bodies."""
+    """Start from model artifacts; gap-fill universal/docs paths only when missing."""
 
     from agent.generated_project import _kind_from_path
+
+    resolved_platform = target_platform or (
+        (project_requirements or {}).get("target_platform")
+    )
+    gap_paths = get_gap_fill_paths(
+        architecture_plan,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
 
     scaffold = generate_project_artifacts(
         idea=idea,
@@ -635,25 +956,33 @@ def hydrate_file_manifest(
         required_features=required_features,
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
-    by_name: dict[str, dict[str, Any]] = {
-        str(artifact["name"]): dict(artifact) for artifact in scaffold
-    }
+    scaffold_by_name = {str(a["name"]): dict(a) for a in scaffold}
+
+    by_name: dict[str, dict[str, Any]] = {}
     for artifact in model_artifacts:
         name = str(artifact.get("name") or "").strip()
         if not name or name.endswith("/") or name.split("/")[-1] == ".env":
             continue
-        base = by_name.get(name, {})
         content = artifact.get("content")
-        body = content if isinstance(content, str) and content.strip() else base.get("content")
-        if body is None:
+        if content is None:
             continue
         by_name[name] = {
             "name": name,
-            "kind": str(artifact.get("kind") or base.get("kind") or _kind_from_path(name)),
-            "summary": str(artifact.get("summary") or base.get("summary") or "Generated by configured LLM."),
-            "content": body if isinstance(body, str) else json.dumps(body, indent=2),
+            "kind": str(artifact.get("kind") or _kind_from_path(name)),
+            "summary": str(artifact.get("summary") or "Generated by configured LLM."),
+            "content": content if isinstance(content, str) else json.dumps(content, indent=2),
         }
+
+    for path in sorted(gap_paths):
+        if path in by_name:
+            continue
+        base = scaffold_by_name.get(path)
+        if base and str(base.get("content") or "").strip():
+            by_name[path] = dict(base)
+
     return [by_name[path] for path in sorted(by_name)]
 
 
