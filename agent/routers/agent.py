@@ -40,7 +40,13 @@ async def start_project(
     return await service.start_task(run_request, background_tasks=background_tasks)
 
 
-router.add_api_route("/agent/run", start_project, methods=["POST"])
+router.add_api_route(
+    "/run",
+    start_project,
+    methods=["POST"],
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=RunAgentResponse,
+)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskDetailResponse)

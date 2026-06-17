@@ -122,8 +122,12 @@ GemPilot/
 ├── frontend/               # Next.js app
 │   └── app/
 │       └── page.tsx        # Mission Control UI (single page)
-├── tests/                  # pytest test suite (~37 test files)
-├── docs/                   # Architecture, API spec, deployment notes
+├── rag/
+│   ├── sources/            # Local markdown corpus for ingest
+│   └── README.md           # RAG API and ingest notes
+├── tools/                  # GitHub export, build checker, policy layer
+├── supabase/               # Migrations and local Supabase config
+├── tests/                  # pytest test suite
 ├── .env.example            # All required and optional env vars
 └── requirements.txt        # Python dependencies
 ```

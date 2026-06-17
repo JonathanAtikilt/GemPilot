@@ -50,13 +50,14 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
     assert data["github_oauth_redirect_uri"] == (
         "http://127.0.0.1:3001/api/auth/github/callback"
     )
-    assert data["service"] == "mvpilot-agent"
+    assert data["service"] == "gempilot-agent"
     assert data["require_live_file_manifest"] is True
     assert "fake-google-ai" not in response.text
 
 
 def test_health_is_degraded_when_live_mode_lacks_llm_config(monkeypatch):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    for key in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     app = create_app(settings=Settings(_env_file=None, adapter_mode="live"))
 
     with TestClient(app) as client:

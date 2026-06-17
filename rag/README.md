@@ -1,6 +1,6 @@
-# NemoPilot RAG Service
+# GemPilot RAG Service
 
-The FastAPI RAG service indexes local markdown/text evidence for the Orchestrator, Frontend UI Agent, GitHub Agent, and build-log memory.
+The FastAPI RAG service indexes local markdown/text evidence for the orchestrator, frontend intake, GitHub export, and build-log memory.
 
 ## Environment
 
@@ -47,7 +47,7 @@ It chunks documents, embeds chunks with the configured embedding provider, store
 curl -X POST http://localhost:3001/rag/search \
   -H 'Content-Type: application/json' \
   -d '{
-    "query": "What should NemoPilot build first based on project rules?",
+    "query": "What should GemPilot build first based on project rules?",
     "topK": 5,
     "docTypes": ["hackathon_rules", "build_log"]
   }'
