@@ -429,7 +429,7 @@ class TestStackAwareValidation:
             {"name": "main.py", "content": "from cli.runner import run\nif __name__ == '__main__': run()"},
             {"name": "cli/__init__.py", "content": ""},
             {"name": "cli/runner.py", "content": "def run():\n    print('Processing data')"},
-            {"name": "README.md", "content": "# DataCLI\n\nData processing CLI.\n\n## Setup\npip install .\n\n## Features\n- ingest\n- transform\n## Demo\ndemo/script.md"},
+            {"name": "README.md", "content": "# DataCLI\n\nPython CLI for ingesting and transforming CSV files into normalized outputs.\n\n## Setup\npip install .\n\n## Features\n- CSV ingestion\n- transform pipeline\n- output formatting\n## Demo\nSee demo/script.md for the DataCLI ingestion walkthrough."},
             {"name": "docs/ARCHITECTURE.md", "content": "# Architecture\n## Frontend\nCLI\n## Backend\nPython\n## Data\nFile\n## Auth\nNone"},
             {"name": "docs/API_SPEC.md", "content": "# CLI: python main.py"},
             {"name": "docs/DATABASE_SCHEMA.sql", "content": "CREATE TABLE runs (id INTEGER PRIMARY KEY);"},
@@ -437,10 +437,10 @@ class TestStackAwareValidation:
             {"name": "tests/test_backend.py", "content": "from cli.runner import run\ndef test_run(): run()"},
             {"name": "data/seed.json", "content": '[{"id":1,"value":"sample"}]'},
             {"name": "scripts/seed_data.py", "content": "import json\ndata=json.load(open('data/seed.json'))"},
-            {"name": "demo/script.md", "content": "# Demo DataCLI pipeline"},
-            {"name": "demo/storyboard.md", "content": "# Storyboard DataCLI"},
-            {"name": "demo/demo_walkthrough.md", "content": "# Walkthrough DataCLI ingestion"},
-            {"name": "demo/video_outline.md", "content": "# Video DataCLI demo"},
+            {"name": "demo/script.md", "content": "# Demo DataCLI CSV ingestion and transforming pipeline"},
+            {"name": "demo/storyboard.md", "content": "# Storyboard DataCLI ingesting CSV files"},
+            {"name": "demo/demo_walkthrough.md", "content": "# Walkthrough DataCLI ingesting and transforming files"},
+            {"name": "demo/video_outline.md", "content": "# Video DataCLI Python tool demo"},
             {"name": "pyproject.toml", "content": "[project]\nname='datacli'\n"},
         ]
         validation = validate_project_output(

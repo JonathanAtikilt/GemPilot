@@ -32,7 +32,7 @@ def test_github_connect_redirects_to_github_with_backend_state():
 
     with TestClient(app) as client:
         response = client.get(
-            "/github/connect?return_to=http://localhost:3000",
+            "/api/auth/github/login?return_to=http://localhost:3000",
             follow_redirects=False,
         )
 
@@ -86,7 +86,7 @@ def test_github_connect_rejects_untrusted_return_to():
 
     with TestClient(app) as client:
         response = client.get(
-            "/github/connect?return_to=https://evil.example",
+            "/api/auth/github/login?return_to=https://evil.example",
             follow_redirects=False,
         )
 
@@ -102,7 +102,7 @@ def test_github_callback_requires_known_state():
 
     with TestClient(app) as client:
         response = client.get(
-            "/github/callback?code=raw-oauth-code&state=wrong&return_to=http://localhost:3000",
+            "/api/auth/github/callback?code=raw-oauth-code&state=wrong&return_to=http://localhost:3000",
             follow_redirects=False,
         )
 
@@ -132,13 +132,13 @@ def test_github_callback_exchanges_token_and_redirects_safely():
 
     with TestClient(app) as client:
         connect_response = client.get(
-            "/github/connect?return_to=http://localhost:3000",
+            "/api/auth/github/login?return_to=http://localhost:3000",
             follow_redirects=False,
         )
         state = parse_qs(urlparse(connect_response.headers["location"]).query)["state"][0]
 
         callback_response = client.get(
-            f"/github/callback?code=raw-oauth-code&state={state}",
+            f"/api/auth/github/callback?code=raw-oauth-code&state={state}",
             follow_redirects=False,
         )
 

@@ -22,6 +22,7 @@ def test_resolve_options_uses_groq_when_primary_key_is_missing(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("ALLOW_IDEA_AWARE_PARTIAL", "true")
     monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_FALLBACK_MODEL", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("GROQ_API_KEY", "test-groq")
 

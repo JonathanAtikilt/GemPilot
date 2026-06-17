@@ -103,7 +103,9 @@ async def test_provider_model_client_posts_gemini_structured_request() -> None:
     assert posted["systemInstruction"]["parts"][0]["text"]
 
 
-async def test_provider_model_client_degrades_when_key_missing() -> None:
+async def test_provider_model_client_degrades_when_key_missing(monkeypatch) -> None:
+    for key in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "LLM_FALLBACK_MODEL"):
+        monkeypatch.delenv(key, raising=False)
     settings = Settings(
         _env_file=None,
         adapter_mode="live",

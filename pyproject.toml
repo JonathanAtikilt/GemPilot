@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mvpilot-agent"
+name = "gempilot-agent"
 version = "0.1.0"
-description = "FastAPI backend scaffold for the MVPilot autonomous agent."
+description = "GemPilot LangGraph agent for demo-ready full-stack project generation."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",

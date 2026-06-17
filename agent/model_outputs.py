@@ -148,3 +148,9 @@ class PitchOutput(TracedModelOutput):
     tagline: str
     content: str
     proof_points: list[str] = Field(min_length=1)
+
+
+# Workflow aliases kept for stable imports across the pipeline.
+MvpScopeOutput = ProjectRequirementsOutput
+RepoPlanOutput = ArchitecturePlanOutput
+DemoScriptOutput = WalkthroughOutput

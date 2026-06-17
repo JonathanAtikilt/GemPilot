@@ -17,6 +17,14 @@ htmlcov/
 *.egg-info/
 logs/*.log
 
+# OS and demo artifacts
+.DS_Store
+*.mp4
+*.mov
+
+# Session audit reports (not for version control)
+*_REPORT.md
+
 .idea/
 .playwright-mcp/
 

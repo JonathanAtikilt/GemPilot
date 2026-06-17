@@ -115,7 +115,7 @@ async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeyp
 
     assert len(response.requiredDeliverables) == 4
     assert all(
-        item.source == "mvpilot_default_build_context"
+        item.source == "gempilot_default_build_context"
         for item in response.requiredDeliverables
     )
     assert len(response.allowedToolsAndAPIs) == 3
@@ -123,7 +123,7 @@ async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeyp
     assert len(response.requiredDemoFormat) == 3
     assert len(response.requiredTechStackPieces) == 3
     assert len(response.scopeWarnings) == 3
-    assert response.scopeWarnings[0].source == "mvpilot_default_build_context"
+    assert response.scopeWarnings[0].source == "gempilot_default_build_context"
     assert response.evidence == []
     assert response.resolvedTechStack.source == "default"
     assert response.resolvedTechStack.requiredItems == []
