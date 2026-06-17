@@ -179,7 +179,8 @@ def test_validate_mvp_output_patches_sparse_architecture_doc():
                 "Track maintenance history",
                 "Mechanic dashboard",
                 "Parts inventory alerts",
-            ]
+            ],
+            "target_platform": "web app",
         },
         repo_plan={"files": ["README.md"], "implementation_steps": ["Build app"]},
         generated_artifacts=artifacts,

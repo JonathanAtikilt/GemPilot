@@ -127,8 +127,21 @@ def ensure_architecture_doc_complete(
     *,
     plan: dict[str, Any] | None,
     title: str,
+    target_platform: str | None = None,
 ) -> list[dict[str, Any]]:
     """Patch architecture docs so validation and judges see full-stack coverage."""
+    stack = _detect_stack_from_artifacts(artifacts)
+    platform = str(
+        target_platform
+        or (plan or {}).get("target_platform")
+        or ""
+    ).lower()
+    is_web = stack.get("has_frontend") or stack.get("has_web_backend")
+    if not is_web and platform in {"", "web app", "mobile app", "dashboard"}:
+        is_web = True
+    if not is_web:
+        return artifacts
+
     active_plan = plan or {}
     architecture = _artifact_content(artifacts, "docs/ARCHITECTURE.md")
     if _architecture_covers_full_system(architecture, active_plan):
@@ -299,6 +312,7 @@ def validate_project_output(
         generated_artifacts,
         plan=plan,
         title=title,
+        target_platform=str(requirements.get("target_platform") or ""),
     )
     idea_tokens = _idea_tokens(idea)
     title_tokens = _idea_tokens(title)
@@ -510,10 +524,15 @@ def validate_project_output(
         "user_flow_defined",
         "generated_files_not_placeholders",
         "imports_resolve",
-        "readme_setup_features_demo",
-        "demo_materials_generated",
-        "seed_data_present",
     }
+    # Only require demo files and seed data for web/hackathon projects
+    if is_web_project:
+        critical.add("seed_data_present")
+        critical.add("demo_materials_generated")
+        critical.add("readme_setup_features_demo")
+    else:
+        # For non-web projects these checks remain in the set but as non-critical
+        pass
     # Architecture doc and API/DB planning are only critical for web projects;
     # a CLI/package is not expected to document frontend/backend/auth/db layers.
     if is_web_project:

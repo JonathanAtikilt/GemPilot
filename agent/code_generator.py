@@ -32,6 +32,67 @@ from agent.prompts import (
 
 logger = logging.getLogger(__name__)
 
+_STANDARD_STAGES = ("database", "backend", "frontend", "docs", "demo")
+_BACKEND_STAGE_HINTS = frozenset(
+    {
+        "backend",
+        "cli_core",
+        "commands",
+        "analytics_api",
+        "extension_core",
+        "content_scripts",
+        "game_server",
+        "api",
+    }
+)
+_FRONTEND_STAGE_HINTS = frozenset(
+    {
+        "frontend",
+        "static_site",
+        "content_sections",
+        "popup_ui",
+        "game_client",
+    }
+)
+_DATABASE_STAGE_HINTS = frozenset({"database"})
+
+
+def _generation_stages(
+    architecture: dict[str, Any],
+    product_brief: dict[str, Any],
+) -> tuple[str, ...]:
+    """Return LLM generation stages appropriate for the classified architecture."""
+    validation = architecture.get("validation_profile") or {}
+    impl = [
+        str(stage).lower()
+        for stage in (architecture.get("implementation_stages") or [])
+    ]
+
+    if impl:
+        include_db = any(stage in _DATABASE_STAGE_HINTS for stage in impl)
+        include_backend = any(stage in _BACKEND_STAGE_HINTS for stage in impl)
+        include_frontend = any(stage in _FRONTEND_STAGE_HINTS for stage in impl)
+    else:
+        include_db = bool(
+            validation.get("check_database_models", product_brief.get("database_required", True))
+        )
+        include_backend = bool(
+            validation.get("check_backend_routes", product_brief.get("backend_required", True))
+        )
+        include_frontend = bool(
+            validation.get("check_frontend_routes", product_brief.get("frontend_required", True))
+        )
+
+    stages: list[str] = []
+    if include_db:
+        stages.append("database")
+    if include_backend:
+        stages.append("backend")
+    if include_frontend:
+        stages.append("frontend")
+    stages.extend(["docs", "demo"])
+    return tuple(stages or _STANDARD_STAGES)
+
 
 async def run_staged_generation(
     *,
@@ -42,7 +103,64 @@ async def run_staged_generation(
     stack: dict[str, Any],
     architecture: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str, list[str]]:
-    """Run the 5-stage code-generation pipeline.
+    """Run profile-aware staged generation with retry and architecture simplification."""
+    attempts: list[tuple[str, dict[str, Any]]] = [
+        ("full", architecture),
+        ("simplified", _simplify_architecture(architecture)),
+        ("minimal", _simplify_architecture(architecture, minimal=True)),
+    ]
+    last_mode = "degraded"
+    last_traces: list[str] = []
+    last_artifacts: list[dict[str, Any]] = []
+
+    for attempt_name, arch in attempts:
+        artifacts, mode, traces = await _run_staged_generation_once(
+            model_client=model_client,
+            settings=settings,
+            idea=idea,
+            product_brief=product_brief,
+            stack=stack,
+            architecture=arch,
+        )
+        last_artifacts, last_mode, last_traces = artifacts, mode, traces
+        traces.insert(0, f"generation_attempt={attempt_name} files={len(artifacts)} mode={mode}")
+        if artifacts and mode == "live":
+            return artifacts, mode, traces
+        if artifacts and attempt_name == "minimal":
+            return artifacts, mode, traces
+    return last_artifacts, last_mode, last_traces
+
+
+def _simplify_architecture(architecture: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+    simplified = dict(architecture)
+    stages = [
+        str(stage)
+        for stage in (architecture.get("implementation_stages") or [])
+        if str(stage).strip()
+    ]
+    if minimal:
+        keep = {"docs", "demo", "cli_core", "commands", "api_core", "routes", "static_site"}
+        simplified["implementation_stages"] = [s for s in stages if s in keep] or ["docs", "demo"]
+    else:
+        drop = {"database", "frontend", "analytics_api", "popup_ui", "content_scripts"}
+        simplified["implementation_stages"] = [s for s in stages if s not in drop] or stages
+    profile = dict(simplified.get("validation_profile") or {})
+    profile["check_database_models"] = False if not minimal else profile.get("check_database_models", False)
+    profile["check_frontend_routes"] = False if minimal else profile.get("check_frontend_routes", True)
+    simplified["validation_profile"] = profile
+    return simplified
+
+
+async def _run_staged_generation_once(
+    *,
+    model_client: "ModelClient",
+    settings: "Settings",
+    idea: str,
+    product_brief: dict[str, Any],
+    stack: dict[str, Any],
+    architecture: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    """Run profile-aware staged code generation.
 
     Returns
     -------
@@ -54,110 +172,95 @@ async def run_staged_generation(
     decision_traces : list[str]
         Aggregated decision-trace lines from all stages.
     """
-    by_name: dict[str, dict[str, Any]] = {}  # name → artifact; last write wins
+    by_name: dict[str, dict[str, Any]] = {}
     overall_mode = "live"
     all_traces: list[str] = []
+    stages = _generation_stages(architecture, product_brief)
+    all_traces.append(f"Generation stages selected: {', '.join(stages)}")
 
-    # ── Stage 1 : Database ────────────────────────────────────────────────────
-    db_files, db_mode, db_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_database",
-        prompt=build_database_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-        ),
-    )
-    _merge(by_name, db_files)
-    all_traces.extend(db_traces)
-    if db_mode != "live":
-        overall_mode = db_mode
+    stage_counts: dict[str, int] = {stage: 0 for stage in stages}
 
-    # ── Stage 2 : Backend ─────────────────────────────────────────────────────
-    backend_files, backend_mode, backend_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_backend",
-        prompt=build_backend_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            db_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, backend_files)
-    all_traces.extend(backend_traces)
-    if backend_mode != "live":
-        overall_mode = backend_mode
+    for stage in stages:
+        if stage == "database":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_database",
+                prompt=build_database_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                ),
+            )
+        elif stage == "backend":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_backend",
+                prompt=build_backend_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    db_file_names=list(by_name.keys()),
+                ),
+            )
+        elif stage == "frontend":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_frontend",
+                prompt=build_frontend_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    backend_routes=(
+                        product_brief.get("api_routes")
+                        or architecture.get("api_design")
+                        or []
+                    ),
+                    data_entities=product_brief.get("data_entities"),
+                ),
+            )
+        elif stage == "docs":
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_docs",
+                prompt=build_docs_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    generated_file_names=list(by_name.keys()),
+                ),
+            )
+        else:
+            files, mode, traces = await _run_stage(
+                model_client=model_client,
+                settings=settings,
+                purpose="generate_demo_video",
+                prompt=build_demo_video_generation_prompt(
+                    idea=idea,
+                    product_brief=product_brief,
+                    stack=stack,
+                    architecture=architecture,
+                    generated_file_names=list(by_name.keys()),
+                ),
+            )
 
-    # ── Stage 3 : Frontend ────────────────────────────────────────────────────
-    frontend_files, frontend_mode, frontend_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_frontend",
-        prompt=build_frontend_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            backend_routes=(
-                product_brief.get("api_routes")
-                or architecture.get("api_design")
-                or []
-            ),
-            data_entities=product_brief.get("data_entities"),
-        ),
-    )
-    _merge(by_name, frontend_files)
-    all_traces.extend(frontend_traces)
-    if frontend_mode != "live":
-        overall_mode = frontend_mode
-
-    # ── Stage 4 : Documentation ───────────────────────────────────────────────
-    docs_files, docs_mode, docs_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_docs",
-        prompt=build_docs_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            generated_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, docs_files)
-    all_traces.extend(docs_traces)
-    if docs_mode != "live":
-        overall_mode = docs_mode
-
-    # ── Stage 5 : Demo Video Materials ────────────────────────────────────────
-    demo_files, demo_mode, demo_traces = await _run_stage(
-        model_client=model_client,
-        settings=settings,
-        purpose="generate_demo_video",
-        prompt=build_demo_video_generation_prompt(
-            idea=idea,
-            product_brief=product_brief,
-            stack=stack,
-            architecture=architecture,
-            generated_file_names=list(by_name.keys()),
-        ),
-    )
-    _merge(by_name, demo_files)
-    all_traces.extend(demo_traces)
-    if demo_mode != "live":
-        overall_mode = demo_mode
+        _merge(by_name, files)
+        all_traces.extend(traces)
+        stage_counts[stage] = len(files)
+        if mode != "live":
+            overall_mode = mode
 
     artifacts = [by_name[name] for name in sorted(by_name)]
+    counts = ", ".join(f"{stage}={stage_counts.get(stage, 0)}" for stage in stages)
     all_traces.append(
-        f"Staged generation complete: {len(artifacts)} files across 5 stages "
-        f"(db={len(db_files)}, backend={len(backend_files)}, "
-        f"frontend={len(frontend_files)}, docs={len(docs_files)}, "
-        f"demo_video={len(demo_files)})."
+        f"Staged generation complete: {len(artifacts)} files across {len(stages)} stages ({counts})."
     )
     return artifacts, overall_mode, all_traces
 

@@ -29,7 +29,19 @@ TARGET_PLATFORMS = (
     "desktop app",
 )
 
-PROJECT_ARCHETYPES = ("planner", "marketplace", "dashboard", "workflow", "content", "ai_system")
+PROJECT_ARCHETYPES: tuple[str, ...] = (
+    "planner",
+    "marketplace",
+    "dashboard",
+    "workflow",
+    "content",
+    "ai_system",
+    "cli_tool",          # NEW: terminal tools, developer utilities
+    "browser_extension", # NEW: browser extensions, content scripts
+    "game",              # NEW: multiplayer or single-player games
+    "data_pipeline",     # NEW: ETL, analytics, ML pipelines
+    "library",           # NEW: SDKs, packages, developer libraries
+)
 
 ARCHETYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "planner": (
@@ -94,6 +106,63 @@ ARCHETYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
         "generate",
         "assistant",
     ),
+    "cli_tool": (
+        "cli",
+        "terminal",
+        "command line",
+        "command-line",
+        "developer tool",
+        "git",
+        "bash",
+        "shell script",
+        "npm package",
+        "pip package",
+        "devtools",
+    ),
+    "browser_extension": (
+        "extension",
+        "browser extension",
+        "chrome extension",
+        "firefox",
+        "content script",
+        "popup",
+        "devtools panel",
+        "web scraper extension",
+    ),
+    "game": (
+        "game",
+        "multiplayer",
+        "chess",
+        "puzzle",
+        "quiz game",
+        "trivia",
+        "rpg",
+        "shooter",
+        "platformer",
+        "board game",
+        "card game",
+    ),
+    "data_pipeline": (
+        "etl",
+        "pipeline",
+        "data pipeline",
+        "data engineering",
+        "analytics pipeline",
+        "airflow",
+        "spark",
+        "kafka",
+        "streaming",
+        "batch processing",
+    ),
+    "library": (
+        "sdk",
+        "library",
+        "npm package",
+        "python package",
+        "api client",
+        "developer library",
+        "open source library",
+    ),
 }
 
 ARCHETYPE_API_ROUTES: dict[str, list[str]] = {
@@ -144,6 +213,22 @@ ARCHETYPE_API_ROUTES: dict[str, list[str]] = {
         "POST /api/retrieval/query",
         "GET /api/dashboard",
     ],
+    "cli_tool": [],  # CLI tools have no HTTP routes
+    "browser_extension": [],  # Extensions have no HTTP routes
+    "game": [
+        "GET /api/leaderboard",
+        "POST /api/games",
+        "GET /api/games/{id}",
+        "POST /api/games/{id}/move",
+        "GET /api/players/{id}",
+    ],
+    "data_pipeline": [
+        "POST /api/jobs",
+        "GET /api/jobs/{id}/status",
+        "GET /api/jobs/{id}/results",
+        "GET /api/datasets",
+    ],
+    "library": [],  # Libraries have no HTTP routes
 }
 
 
@@ -202,6 +287,57 @@ def depth_profile(depth: str | None) -> dict[str, Any]:
 
 def classify_project_archetype(*, idea: str, required_features: list[str] | None = None) -> str:
     corpus = " ".join([idea, *(required_features or [])]).lower()
+    idea_lower = idea.lower()
+
+    def _has(term: str) -> bool:
+        if len(term) <= 4:
+            return re.search(rf"\b{re.escape(term)}\b", idea_lower) is not None
+        return term in idea_lower
+
+    # CLI tool detection — check before general keyword scoring
+    if any(
+        _has(kw)
+        for kw in (
+            "cli",
+            "terminal",
+            "command line",
+            "command-line",
+            "developer tool",
+            "bash",
+            "shell script",
+            "devtools",
+        )
+    ) or "git" in idea_lower.split() or idea_lower.startswith("git "):
+        return "cli_tool"
+
+    # Browser extension detection
+    if any(kw in idea_lower for kw in (
+        "extension", "browser extension", "chrome extension", "firefox",
+        "content script", "popup", "devtools panel", "web scraper extension",
+    )):
+        return "browser_extension"
+
+    # Game detection
+    if any(kw in idea_lower for kw in (
+        "game", "multiplayer", "chess", "puzzle", "quiz game", "trivia",
+        "rpg", "shooter", "platformer", "board game", "card game",
+    )):
+        return "game"
+
+    # Data pipeline detection
+    if any(kw in idea_lower for kw in (
+        "etl", "pipeline", "data pipeline", "data engineering", "analytics pipeline",
+        "airflow", "spark", "kafka", "streaming", "batch processing",
+    )):
+        return "data_pipeline"
+
+    # Library / SDK detection
+    if any(kw in idea_lower for kw in (
+        "sdk", "library", "npm package", "python package", "api client",
+        "developer library", "open source library",
+    )):
+        return "library"
+
     scores = {
         archetype: sum(1 for keyword in keywords if keyword in corpus)
         for archetype, keywords in ARCHETYPE_KEYWORDS.items()
@@ -348,22 +484,6 @@ def enrich_project_requirements(
         api_routes = default_api_routes(archetype)
 
     advanced_features = _string_list(requirements.get("advanced_features") or [])
-    if len(core_features) >= 6 and not advanced_features:
-        advanced_features = [
-            "Role-aware authenticated workspace",
-            "Searchable dashboard with progress and status signals",
-            "Exportable project evidence and activity log",
-        ]
-    if _looks_like_study_project(idea, core_features):
-        advanced_features = _unique_strings(
-            [
-                *advanced_features,
-                "Spaced repetition review queue",
-                "Personalized exam readiness dashboard",
-                "Quiz and flashcard generation from uploaded notes",
-            ]
-        )
-
     target_platform = (
         str(requirements.get("target_platform") or intake.get("targetPlatform") or intake.get("target_platform") or "")
         .strip()
@@ -390,7 +510,6 @@ def enrich_project_requirements(
         or [
             "User can complete the primary end-to-end workflow",
             "Architecture, setup, testing, and deployment notes are generated",
-            "Generated repository includes frontend, backend, data model, tests, and docs",
         ],
         "auth_required": bool(requirements.get("auth_required", profile["requires_auth"])),
         "database_required": bool(requirements.get("database_required", profile["requires_database"])),
@@ -478,42 +597,19 @@ def user_flow_checklist(user_flows: list[dict[str, Any]]) -> list[str]:
 
 
 def _complete_feature_set(*, idea: str, provided: list[str], minimum: int) -> list[str]:
+    """Keep explicit features plus only logically implied ones — no template stuffing."""
     features = _unique_strings(provided)
-    if _looks_like_study_project(idea, features):
-        features = _unique_strings(
-            [
-                *features,
-                "Secure student authentication and workspace profiles",
-                "Lecture note upload with parsing and source tracking",
-                "AI-generated summaries with key concept extraction",
-                "Quiz generation flow with answer explanations",
-                "Flashcard creation and review states",
-                "Spaced repetition schedule based on confidence and due dates",
-                "Personalized exam prep dashboard with readiness signals",
-                "Progress history, weak-topic detection, and next-study recommendations",
-                "Teacher or study-group sharing hooks",
-                "Audit log for generated study assets",
-                "Testing, setup, and deployment documentation",
-            ]
-        )
-    fallback = [
-        f"Authenticated workspace for {title_from_idea(idea)}",
-        "Role-aware dashboard and navigation",
-        "Core create/read/update workflow",
-        "Search, filter, and status tracking",
-        "Database-backed records with validation",
-        "API layer with typed request and response shapes",
-        "Operational activity log",
-        "Automated tests and deployment documentation",
-        "Configuration and environment variable guide",
-        "Future integration hooks",
-    ]
-    for feature in fallback:
-        if len(features) >= minimum:
+    if features:
+        return features
+
+    # Derive minimal features from the idea itself when none were supplied.
+    sentences = [part.strip(" .") for part in re.split(r"[.;\n]", idea) if part.strip()]
+    for sentence in sentences:
+        if len(features) >= max(minimum, 1):
             break
-        if feature not in features:
-            features.append(feature)
-    return features[: max(minimum, len(provided), 6)]
+        if len(sentence) >= 8 and sentence not in features:
+            features.append(sentence[:120])
+    return features[: max(minimum, len(provided), 3)]
 
 
 def _looks_like_study_project(idea: str, features: list[str]) -> bool:

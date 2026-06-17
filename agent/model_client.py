@@ -484,12 +484,11 @@ def _trace(
 
 
 def _extract_idea(prompt: str) -> str:
-    marker = "Idea:\n"
-    if marker not in prompt:
-        return _clean_idea(prompt)
-
-    value = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
-    return _clean_idea(value)
+    for marker in ("Idea:\n", "Product idea:\n", "PROJECT IDEA:\n"):
+        if marker in prompt:
+            value = prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+            return _clean_idea(value)
+    return _clean_idea(prompt)
 
 
 def _clean_idea(value: str) -> str:
@@ -644,7 +643,9 @@ def _repo_plan_payload(
     idea: str,
     prompt: str,
 ) -> dict:
+    from agent.architecture_planner import architecture_plan_to_repo_plan, plan_architecture
     from agent.idea_context import extract_json_section
+    from agent.project_classifier import classify_project
     from agent.stack_recommendation import align_architecture_plan_with_recommended_stack
 
     label = _idea_label(idea)
@@ -652,97 +653,80 @@ def _repo_plan_payload(
     resolved_stack = _extract_resolved_stack_summary(prompt)
     warning_summary = _source_warning_summary(prompt)
     build_context = extract_json_section(prompt, "Structured build context:\n")
+    intake = extract_json_section(prompt, "Frontend intake:\n") or {}
     recommended = (
         build_context.get("recommendedStack")
         if isinstance(build_context, dict)
         else None
     )
-    files = [
-        "README.md",
-        "package.json",
-        "index.html",
-        "src/App.jsx",
-        "src/main.jsx",
-        "src/lib/api.js",
-        "src/state/projectState.js",
-        "src/styles.css",
-        "backend/main.py",
-        "backend/models.py",
-        "backend/services.py",
-        "backend/db.py",
-        "requirements.txt",
-        "tests/test_backend.py",
-        "docs/PROJECT_PLAN.md",
-        "docs/ARCHITECTURE.md",
-        "docs/API_SPEC.md",
-        "docs/DATABASE_SCHEMA.sql",
-        "docs/TESTING_STRATEGY.md",
-        "docs/DEPLOY.md",
-        "docs/AGENT_LOG.md",
-        "docs/BUILD_LOG.md",
-        "docs/KNOWN_LIMITATIONS.md",
-        "docs/WALKTHROUGH.md",
-        "docs/HACKATHON_SUBMISSION.md",
-        "data/seed.json",
-        "scripts/seed_data.py",
-        "demo/script.md",
-        "demo/storyboard.md",
-        "demo/demo_walkthrough.md",
-        "demo/video_outline.md",
-        "demo/voiceover.md",
-        "demo/demo_script.md",
-        ".env.example",
+    requirements = extract_json_section(prompt, "Project requirements:\n") or {}
+    profile = classify_project(idea, intake=intake, requirements=requirements)
+    adaptive = plan_architecture(
+        profile,
+        idea=idea,
+        recommended_stack=recommended if isinstance(recommended, dict) else None,
+        requirements=requirements,
+    )
+    plan_base = architecture_plan_to_repo_plan(adaptive)
+    files = list(plan_base.get("file_tree") or plan_base.get("files") or [])
+    overview = list(plan_base.get("architecture_overview") or [])
+    overview.extend(
+        [
+            f"Use submitted title as project identity: {title}.",
+            f"Use resolvedTechStack for generated files, tests, and architecture: {resolved_stack}.",
+            f"Adaptive blueprint category={profile.category}; architecture_type={profile.architecture_type}.",
+        ]
+    )
+    api_design = [
+        str(route)
+        for route in (requirements.get("api_routes") or [])
+        if str(route).strip()
     ]
+    if not api_design and profile.backend_required:
+        api_design = [
+            "GET /api/health",
+            *(["POST /api/auth/login"] if profile.auth_required else []),
+            "GET /api/data",
+            "POST /api/data",
+        ]
     plan_payload = RepoPlanOutput(
         files=files,
         file_tree=files,
         selected_stack=[item.strip() for item in resolved_stack.split(",") if item.strip()],
-        architecture_overview=[
-            f"Use submitted title as project identity: {title}.",
-            f"Use resolvedTechStack for generated files, tests, and architecture: {resolved_stack}.",
-            "Generate a complete full-stack project with source, tests, docs, database schema, and deployment notes.",
-        ],
-        frontend_architecture=[
-            "React workspace with authenticated project flow, generation surface, review queue, and dashboard.",
-            "API client module isolates fetch calls from UI state.",
-        ],
-        backend_architecture=[
-            "FastAPI app with auth, upload, generation, review, dashboard, and health routes.",
-            "Service layer owns domain logic and provider adapters.",
-        ],
-        data_model=[
-            "users",
-            "project_assets",
-            "generated_items",
-            "activity_logs",
-        ],
-        api_design=[
-            "POST /api/auth/login",
-            "POST /api/uploads",
-            "POST /api/quizzes",
-            "GET /api/flashcards/review",
-            "GET /api/dashboard",
-        ],
-        auth_design=[
-            "Development login route for local testing.",
-            "Production-ready auth replacement documented for Supabase/Auth.js/Clerk.",
-        ],
-        database_schema=[
-            "Postgres tables for users, assets, generated items, and activity logs.",
-        ],
-        state_management=[
-            "React local state for current session, generated artifacts, review queue, and dashboard metrics.",
-        ],
+        architecture_overview=overview,
+        frontend_architecture=list(plan_base.get("frontend_architecture") or []),
+        backend_architecture=list(plan_base.get("backend_architecture") or []),
+        data_model=list(plan_base.get("data_model") or []),
+        api_design=api_design,
+        auth_design=(
+            [
+                "Development login route for local testing.",
+                "Production-ready auth replacement documented when auth is required.",
+            ]
+            if profile.auth_required
+            else ["Authentication omitted — not required for this project profile."]
+        ),
+        database_schema=(
+            [
+                "Persistence layer aligned to classified database requirements.",
+            ]
+            if profile.database_required
+            else ["No database layer required for this project profile."]
+        ),
+        state_management=(
+            [
+                "Client state for primary user flows and generated artifacts.",
+            ]
+            if profile.frontend_required
+            else ["State managed within CLI/extension/runtime entrypoints."]
+        ),
         integration_points=[
-            "AI provider hooks in backend services.",
-            "Supabase/Postgres persistence boundary in backend db adapter.",
+            "Provider hooks documented in architecture plan.",
+            *(["Persistence boundary in backend/db adapter."] if profile.database_required else []),
         ],
-        implementation_steps=[
-            "Create the product-specific frontend workspace.",
-            "Generate backend/API routes that serve the full project data flow.",
-            "Add auth, upload, generation, dashboard, and review workflows.",
-            "Document architecture, setup, env vars, testing, deployment, and limitations.",
-            "Commit generated files through the GitHub Agent.",
+        implementation_steps=list(plan_base.get("implementation_steps") or [])
+        or [
+            f"Implement stage: {stage}" for stage in adaptive.implementation_stages
         ],
         agent_assignments=[
             "Product Strategist Agent: requirements, personas, features, success criteria",
@@ -767,15 +751,14 @@ def _repo_plan_payload(
             "Only include placeholder values in .env.example.",
             "Keep GitHub and Supabase service credentials server-side.",
         ],
-        test_plan=["service unit tests", "API integration tests", "frontend build check", "repository health validation"],
+        test_plan=list(plan_base.get("test_plan") or ["unit tests", "integration checks", "repository health validation"]),
         deployment_plan=[
-            "Deploy frontend as a static Vite app.",
-            "Deploy backend as a Python web service.",
-            "Run Postgres/Supabase schema and set backend-only secrets.",
+            "Deploy according to classified project profile and stack recommendation.",
+            *(["Run database schema and set backend-only secrets."] if profile.database_required else []),
         ],
         documentation_plan=[
             "README with setup and usage",
-            "Architecture, API, database, testing, deployment, limitations, walkthrough, demo materials, and hackathon submission docs",
+            "Architecture, testing, deployment, limitations, walkthrough, demo materials, and submission docs",
         ],
         demo_video_plan=[
             "Create demo/script.md with timestamps for the generated product user flow.",
@@ -784,22 +767,29 @@ def _repo_plan_payload(
         ],
         hackathon_submission_plan=[
             "Summarize problem, solution, stack, differentiators, setup, demo flow, and judging proof.",
-            "Point judges to README, API docs, tests, deployment guide, and demo materials.",
+            "Point judges to README, docs, tests, deployment guide, and demo materials.",
         ],
         mode=mode,
         decision_trace=_trace(
             mode,
             fallback_reason,
             [
-                f"Selected a complete generated project package for the submitted idea: {label}.",
+                f"Selected adaptive repository blueprint for the submitted idea: {label}.",
+                f"Category={profile.category}; stages={', '.join(adaptive.implementation_stages)}.",
                 "Planned around the RAG build context before any GitHub action.",
                 warning_summary or "No submitted source warnings were present.",
                 "Kept generated files secret-safe, testable, and deployable.",
             ],
         ),
     ).model_dump()
+    merged = {
+        **plan_payload,
+        **{k: v for k, v in plan_base.items() if k not in plan_payload or not plan_payload.get(k)},
+        "validation_profile": adaptive.validation_profile,
+        "project_profile_rationale": adaptive.rationale,
+    }
     return align_architecture_plan_with_recommended_stack(
-        plan_payload,
+        merged,
         recommended if isinstance(recommended, dict) else None,
     )
 
