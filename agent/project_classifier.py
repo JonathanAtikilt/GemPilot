@@ -185,7 +185,7 @@ def _target_platform(category: ProjectCategory, intake: dict[str, Any], requirem
     defaults: dict[ProjectCategory, str] = {
         "browser_extension": "browser extension",
         "cli_tool": "cli tool",
-        "portfolio_website": "web app",
+        "portfolio_website": "portfolio",
         "api_service": "api",
         "multiplayer_game": "web app",
         "marketplace": "web app",
@@ -305,11 +305,14 @@ class ProjectClassifier:
                 "marketplace",
                 "multiplayer_game",
                 "research_platform",
-                "sports_analytics",
                 "web_app",
                 "mobile_app",
                 "ai_system",
             }
+            if category == "sports_analytics":
+                auth_required = _mentions(
+                    corpus, "auth", "login", "sign in", "user account", "authentication"
+                )
 
         rationale = [
             f"category={category} from idea/platform signals",

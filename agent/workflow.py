@@ -979,6 +979,10 @@ def build_workflow(
             ),
             "tech_stack_preference": tech_stack_from_context(intake, repo_plan),
             "project_requirements": mvp_scope,
+            "target_platform": mvp_scope.get("target_platform")
+            or intake.get("targetPlatform")
+            or intake.get("target_platform"),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
         }
         if overall_mode == "live":
             raw_artifacts = hydrate_file_manifest(raw_artifacts, **generation_kwargs)
@@ -1103,6 +1107,12 @@ def build_workflow(
             project_plan=state.get("project_plan"),
             generated_artifacts=artifacts,
             model_modes=modes,
+            project_requirements={
+                **enriched_scope,
+                "demo_mode": state.get("demo_mode"),
+                "is_hackathon_mode": bool(state.get("demo_mode")),
+            },
+            architecture_plan=state.get("repo_plan") or {},
         )
 
         delivery = build_delivery_report(

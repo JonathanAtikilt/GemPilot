@@ -26,6 +26,9 @@ def build_project_artifacts(
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
     mvp_scope: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    api_routes: list[str] | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, str]]:
     """Create a complete generated project package from the orchestration plan."""
 
@@ -49,22 +52,50 @@ def build_project_artifacts(
     user_flows = requirements.get("user_flows") if isinstance(requirements.get("user_flows"), list) else []
     archetype = str(requirements.get("project_archetype") or "workflow")
     depth = str(requirements.get("project_depth") or "Advanced Project")
-    target_platform = str(requirements.get("target_platform") or "web app")
+    # Explicit parameter takes precedence over requirements-derived platform
+    _req_platform = str(requirements.get("target_platform") or "web app")
+    target_platform = str(target_platform or _req_platform)
     route = project_collection_route(archetype)
     tabs = project_tabs(archetype, idea)
     is_study = _looks_like_study_project(idea, features)
-    api_routes = _string_list(requirements.get("api_routes"))
-    if not api_routes:
-        api_routes = [
-            "POST /api/auth/login",
-            "POST /api/uploads",
-            "POST /api/summaries",
-            "POST /api/quizzes",
-            "GET /api/flashcards/review",
-            "GET /api/dashboard",
-        ]
+    # Explicit api_routes parameter takes precedence over requirements-derived routes
+    _req_routes = _string_list(requirements.get("api_routes"))
+    if api_routes is not None:
+        api_routes = list(api_routes)
+    elif _req_routes:
+        api_routes = _req_routes
+    else:
+        api_routes = ["GET /health"]
 
-    files = [
+    # Platform resolver — determines which file sets are included
+    project_category = str(requirements.get("project_category") or "").lower()
+    platform_lower = (target_platform or "web app").lower().strip()
+    is_api_only = (
+        platform_lower in ("api", "api only", "api service", "backend only")
+        or project_category == "api_service"
+    )
+    is_cli = (
+        platform_lower in ("cli", "cli tool", "terminal", "command line", "desktop tool")
+        or project_category == "cli_tool"
+    )
+    is_extension = (
+        platform_lower in ("browser extension", "extension", "chrome extension")
+        or project_category == "browser_extension"
+    )
+    is_mobile = (
+        platform_lower in ("mobile app", "mobile", "ios app", "android app")
+        or "react native" in platform_lower
+        or project_category == "mobile_app"
+    )
+    is_portfolio = (
+        platform_lower in ("portfolio", "portfolio website", "static site")
+        or "portfolio" in idea.lower()
+        or project_category == "portfolio_website"
+    )
+    is_web = not (is_api_only or is_cli or is_extension or is_mobile or is_portfolio)
+
+    # Common docs/demo files present in every platform type
+    common_files: list[dict[str, str]] = [
         {
             "name": "README.md",
             "kind": "markdown",
@@ -84,105 +115,10 @@ def build_project_artifacts(
             ),
         },
         {
-            "name": "package.json",
-            "kind": "json",
-            "summary": "Frontend scripts, build command, and test dependencies.",
-            "content": _package_json(slug),
-        },
-        {
-            "name": "index.html",
-            "kind": "html",
-            "summary": "Frontend HTML shell.",
-            "content": _index_html(project_title),
-        },
-        {
-            "name": "src/main.jsx",
-            "kind": "javascript",
-            "summary": "React entrypoint.",
-            "content": _main_jsx(),
-        },
-        {
-            "name": "src/App.jsx",
-            "kind": "javascript",
-            "summary": "Full project studio UI with auth, upload, generation, review, and dashboard flows.",
-            "content": _react_app(
-                project_title=project_title,
-                idea=idea,
-                features=features,
-                advanced_features=advanced_features,
-                personas=personas,
-                user_flows=user_flows,
-                api_routes=api_routes,
-                tabs=tabs,
-                route=route,
-                is_study=is_study,
-            ),
-        },
-        {
-            "name": "src/lib/api.js",
-            "kind": "javascript",
-            "summary": "Typed API client helpers for the generated backend routes.",
-            "content": _api_client(api_routes),
-        },
-        {
-            "name": "src/state/projectState.js",
-            "kind": "javascript",
-            "summary": "Domain seed state used by the generated UI and tests.",
-            "content": _frontend_state(project_title, features, user_flows, is_study),
-        },
-        {
             "name": "data/seed.json",
             "kind": "json",
             "summary": "Project-specific seed/sample data for local demos.",
             "content": _seed_json(project_title, idea, features, user_flows, is_study),
-        },
-        {
-            "name": "scripts/seed_data.py",
-            "kind": "python",
-            "summary": "Seed script that loads sample data through the generated persistence adapter.",
-            "content": _seed_script(),
-        },
-        {
-            "name": "src/styles.css",
-            "kind": "css",
-            "summary": "Responsive application styling for a production-style tool surface.",
-            "content": _css(),
-        },
-        {
-            "name": "backend/main.py",
-            "kind": "python",
-            "summary": "FastAPI app with auth, upload, summary, quiz, flashcard, dashboard, and health routes.",
-            "content": _backend_main(project_title, idea, features, api_routes, is_study),
-        },
-        {
-            "name": "backend/models.py",
-            "kind": "python",
-            "summary": "Pydantic request and response models for generated API flows.",
-            "content": _backend_models(project_title, features),
-        },
-        {
-            "name": "backend/services.py",
-            "kind": "python",
-            "summary": "Business logic for parsing inputs, generating study or project outputs, and dashboard metrics.",
-            "content": _backend_services(project_title, idea, features, is_study),
-        },
-        {
-            "name": "backend/db.py",
-            "kind": "python",
-            "summary": "SQLite-backed persistence adapter with Postgres-ready boundaries.",
-            "content": _backend_db(slug),
-        },
-        {
-            "name": "requirements.txt",
-            "kind": "text",
-            "summary": "Backend runtime and test dependencies.",
-            "content": "fastapi\nuvicorn[standard]\npydantic\npython-multipart\npytest\nhttpx\n",
-        },
-        {
-            "name": "tests/test_backend.py",
-            "kind": "python",
-            "summary": "Generated API and service tests for the project workflows.",
-            "content": _backend_tests(project_title, is_study),
         },
         {
             "name": "docs/PROJECT_PLAN.md",
@@ -195,18 +131,6 @@ def build_project_artifacts(
             "kind": "markdown",
             "summary": "Frontend, backend, data, auth, integration, testing, and deployment architecture.",
             "content": _architecture(project_title, idea, stack, requirements, plan, warnings),
-        },
-        {
-            "name": "docs/API_SPEC.md",
-            "kind": "markdown",
-            "summary": "API route plan with responsibilities and data flow.",
-            "content": _api_spec(project_title, api_routes),
-        },
-        {
-            "name": "docs/DATABASE_SCHEMA.sql",
-            "kind": "sql",
-            "summary": "Postgres/Supabase schema for users, uploads, generated assets, reviews, and logs.",
-            "content": _database_schema(slug, is_study),
         },
         {
             "name": "docs/TESTING_STRATEGY.md",
@@ -245,54 +169,364 @@ def build_project_artifacts(
             "content": _walkthrough(project_title, idea, features, user_flows, api_routes, is_study),
         },
         {
-            "name": "docs/HACKATHON_SUBMISSION.md",
-            "kind": "markdown",
-            "summary": "Hackathon submission summary with problem, solution, tech, demo flow, and proof.",
-            "content": _hackathon_submission(project_title, idea, stack, features, api_routes, is_study),
-        },
-        {
-            "name": "demo/script.md",
-            "kind": "markdown",
-            "summary": "Timestamped demo video script for the generated product.",
-            "content": _demo_script(project_title, idea, features, user_flows, api_routes, is_study),
-        },
-        {
-            "name": "demo/storyboard.md",
-            "kind": "markdown",
-            "summary": "Shot-by-shot storyboard for recording a hackathon demo.",
-            "content": _storyboard(project_title, features, user_flows, api_routes, is_study),
-        },
-        {
-            "name": "demo/demo_walkthrough.md",
-            "kind": "markdown",
-            "summary": "Click-by-click local demo walkthrough.",
-            "content": _walkthrough(project_title, idea, features, user_flows, api_routes, is_study),
-        },
-        {
-            "name": "demo/video_outline.md",
-            "kind": "markdown",
-            "summary": "Recording outline for the final demo video.",
-            "content": _video_outline(project_title, idea, features, api_routes, is_study),
-        },
-        {
-            "name": "demo/voiceover.md",
-            "kind": "markdown",
-            "summary": "Optional voiceover copy for the demo video.",
-            "content": _voiceover(project_title, idea, features, is_study),
-        },
-        {
-            "name": "demo/demo_script.md",
-            "kind": "markdown",
-            "summary": "Backward-compatible copy of the judge-facing demo script.",
-            "content": _demo_script(project_title, idea, features, user_flows, api_routes, is_study),
-        },
-        {
             "name": ".env.example",
             "kind": "text",
             "summary": "Safe placeholder environment file.",
             "content": _env_example(project_title),
         },
     ]
+
+    if is_hackathon_mode:
+        common_files.extend(
+            [
+                {
+                    "name": "docs/HACKATHON_SUBMISSION.md",
+                    "kind": "markdown",
+                    "summary": "Hackathon submission summary with problem, solution, tech, demo flow, and proof.",
+                    "content": _hackathon_submission(project_title, idea, stack, features, api_routes, is_study),
+                },
+                {
+                    "name": "demo/script.md",
+                    "kind": "markdown",
+                    "summary": "Timestamped demo video script for the generated product.",
+                    "content": _demo_script(project_title, idea, features, user_flows, api_routes, is_study),
+                },
+                {
+                    "name": "demo/storyboard.md",
+                    "kind": "markdown",
+                    "summary": "Shot-by-shot storyboard for recording a hackathon demo.",
+                    "content": _storyboard(project_title, features, user_flows, api_routes, is_study),
+                },
+                {
+                    "name": "demo/demo_walkthrough.md",
+                    "kind": "markdown",
+                    "summary": "Click-by-click local demo walkthrough.",
+                    "content": _walkthrough(project_title, idea, features, user_flows, api_routes, is_study),
+                },
+                {
+                    "name": "demo/video_outline.md",
+                    "kind": "markdown",
+                    "summary": "Recording outline for the final demo video.",
+                    "content": _video_outline(project_title, idea, features, api_routes, is_study),
+                },
+                {
+                    "name": "demo/voiceover.md",
+                    "kind": "markdown",
+                    "summary": "Optional voiceover copy for the demo video.",
+                    "content": _voiceover(project_title, idea, features, is_study),
+                },
+                {
+                    "name": "demo/demo_script.md",
+                    "kind": "markdown",
+                    "summary": "Backward-compatible copy of the judge-facing demo script.",
+                    "content": _demo_script(project_title, idea, features, user_flows, api_routes, is_study),
+                },
+            ]
+        )
+
+    if requirements.get("database_required") is False:
+        common_files = [item for item in common_files if item["name"] != "data/seed.json"]
+
+    # Platform-specific file sets
+    platform_files: list[dict[str, str]] = []
+    needs_database = bool(requirements.get("database_required", True))
+
+    if is_mobile:
+        platform_files += [
+            {
+                "name": "package.json",
+                "kind": "json",
+                "summary": "React Native app metadata and scripts.",
+                "content": _mobile_package_json(slug, project_title),
+            },
+            {
+                "name": "App.tsx",
+                "kind": "typescript",
+                "summary": "React Native root component.",
+                "content": _mobile_app_tsx(project_title, idea, features),
+            },
+            {
+                "name": "index.js",
+                "kind": "javascript",
+                "summary": "React Native entrypoint.",
+                "content": _mobile_index_js(),
+            },
+            {
+                "name": "src/lib/api.ts",
+                "kind": "typescript",
+                "summary": "API client for the mobile app.",
+                "content": _api_client(api_routes).replace("import.meta.env.VITE_API_BASE_URL", "process.env.EXPO_PUBLIC_API_BASE_URL"),
+            },
+        ]
+    elif is_portfolio:
+        platform_files += [
+            {
+                "name": "frontend/index.html",
+                "kind": "html",
+                "summary": "Portfolio site HTML shell.",
+                "content": _index_html(project_title).replace('id="root"', 'id="app"'),
+            },
+            {
+                "name": "frontend/src/main.js",
+                "kind": "javascript",
+                "summary": "Portfolio site entrypoint.",
+                "content": "document.getElementById('app').innerHTML = '<h1>Portfolio</h1>';\n",
+            },
+            {
+                "name": "frontend/src/styles.css",
+                "kind": "css",
+                "summary": "Portfolio styling.",
+                "content": _css(),
+            },
+        ]
+    elif is_web:
+        platform_files += [
+            {
+                "name": "package.json",
+                "kind": "json",
+                "summary": "Frontend scripts, build command, and test dependencies.",
+                "content": _package_json(slug),
+            },
+            {
+                "name": "index.html",
+                "kind": "html",
+                "summary": "Frontend HTML shell.",
+                "content": _index_html(project_title),
+            },
+            {
+                "name": "src/main.jsx",
+                "kind": "javascript",
+                "summary": "React entrypoint.",
+                "content": _main_jsx(),
+            },
+            {
+                "name": "src/App.jsx",
+                "kind": "javascript",
+                "summary": "Full project studio UI with auth, upload, generation, review, and dashboard flows.",
+                "content": _react_app(
+                    project_title=project_title,
+                    idea=idea,
+                    features=features,
+                    advanced_features=advanced_features,
+                    personas=personas,
+                    user_flows=user_flows,
+                    api_routes=api_routes,
+                    tabs=tabs,
+                    route=route,
+                    is_study=is_study,
+                ),
+            },
+            {
+                "name": "src/lib/api.js",
+                "kind": "javascript",
+                "summary": "Typed API client helpers for the generated backend routes.",
+                "content": _api_client(api_routes),
+            },
+            {
+                "name": "src/state/projectState.js",
+                "kind": "javascript",
+                "summary": "Domain seed state used by the generated UI and tests.",
+                "content": _frontend_state(project_title, features, user_flows, is_study),
+            },
+            {
+                "name": "src/styles.css",
+                "kind": "css",
+                "summary": "Responsive application styling for a production-style tool surface.",
+                "content": _css(),
+            },
+            {
+                "name": "backend/main.py",
+                "kind": "python",
+                "summary": "FastAPI app with auth, upload, summary, quiz, flashcard, dashboard, and health routes.",
+                "content": _backend_main(
+                    project_title, idea, features, api_routes, is_study, needs_database
+                ),
+            },
+            {
+                "name": "backend/models.py",
+                "kind": "python",
+                "summary": "Pydantic request and response models for generated API flows.",
+                "content": _backend_models(project_title, features),
+            },
+            {
+                "name": "backend/services.py",
+                "kind": "python",
+                "summary": "Business logic for the generated API routes.",
+                "content": _backend_services(project_title, idea, features, is_study),
+            },
+            {
+                "name": "requirements.txt",
+                "kind": "text",
+                "summary": "Backend runtime and test dependencies.",
+                "content": "fastapi\nuvicorn[standard]\npydantic\npython-multipart\npytest\nhttpx\n",
+            },
+            {
+                "name": "tests/test_backend.py",
+                "kind": "python",
+                "summary": "Generated API smoke tests for planned routes.",
+                "content": _backend_tests(project_title, api_routes),
+            },
+            {
+                "name": "docs/API_SPEC.md",
+                "kind": "markdown",
+                "summary": "API route plan with responsibilities and data flow.",
+                "content": _api_spec(project_title, api_routes),
+            },
+        ]
+        if needs_database:
+            platform_files += [
+                {
+                    "name": "backend/db.py",
+                    "kind": "python",
+                    "summary": "SQLite-backed persistence adapter with Postgres-ready boundaries.",
+                    "content": _backend_db(slug),
+                },
+                {
+                    "name": "scripts/seed_data.py",
+                    "kind": "python",
+                    "summary": "Seed script that loads sample data through the generated persistence adapter.",
+                    "content": _seed_script(),
+                },
+                {
+                    "name": "docs/DATABASE_SCHEMA.sql",
+                    "kind": "sql",
+                    "summary": "Postgres/Supabase schema for the generated project.",
+                    "content": _database_schema(slug, is_study),
+                },
+            ]
+
+    elif is_api_only:
+        platform_files += [
+            {
+                "name": "backend/main.py",
+                "kind": "python",
+                "summary": "FastAPI application exposing the planned API routes.",
+                "content": _backend_main(
+                    project_title, idea, features, api_routes, is_study, needs_database
+                ),
+            },
+            {
+                "name": "backend/models.py",
+                "kind": "python",
+                "summary": "Pydantic request and response models.",
+                "content": _backend_models(project_title, features),
+            },
+            {
+                "name": "backend/services.py",
+                "kind": "python",
+                "summary": "Business logic layer for the API service.",
+                "content": _backend_services(project_title, idea, features, is_study),
+            },
+            {
+                "name": "requirements.txt",
+                "kind": "text",
+                "summary": "API service runtime and test dependencies.",
+                "content": "fastapi\nuvicorn[standard]\npydantic\npython-multipart\npytest\nhttpx\n",
+            },
+            {
+                "name": "tests/test_api.py",
+                "kind": "python",
+                "summary": "API smoke tests for all generated routes.",
+                "content": _backend_tests(project_title, api_routes),
+            },
+            {
+                "name": "docs/API_SPEC.md",
+                "kind": "markdown",
+                "summary": "API route plan with responsibilities and data flow.",
+                "content": _api_spec(project_title, api_routes),
+            },
+        ]
+        if needs_database:
+            platform_files += [
+                {
+                    "name": "backend/db.py",
+                    "kind": "python",
+                    "summary": "SQLite-backed persistence adapter with Postgres-ready boundaries.",
+                    "content": _backend_db(slug),
+                },
+                {
+                    "name": "docs/DATABASE_SCHEMA.sql",
+                    "kind": "sql",
+                    "summary": "Postgres/Supabase schema for the API service.",
+                    "content": _database_schema(slug, is_study),
+                },
+            ]
+
+    elif is_cli:
+        platform_files += [
+            {
+                "name": "cli/__init__.py",
+                "kind": "python",
+                "summary": "CLI package init.",
+                "content": f'"""Command-line interface for {project_title}."""\n',
+            },
+            {
+                "name": "cli/main.py",
+                "kind": "python",
+                "summary": "CLI entrypoint built with Click.",
+                "content": _cli_main(project_title, idea, features),
+            },
+            {
+                "name": "pyproject.toml",
+                "kind": "text",
+                "summary": "Python project metadata and CLI entry point declaration.",
+                "content": _pyproject_toml(slug, project_title),
+            },
+            {
+                "name": "requirements.txt",
+                "kind": "text",
+                "summary": "CLI runtime and test dependencies.",
+                "content": "click\nrich\npytest\n",
+            },
+            {
+                "name": "tests/test_cli.py",
+                "kind": "python",
+                "summary": "CLI smoke tests using Click's test runner.",
+                "content": _cli_tests(project_title),
+            },
+        ]
+
+    elif is_extension:
+        platform_files += [
+            {
+                "name": "manifest.json",
+                "kind": "json",
+                "summary": "Chrome Extension Manifest V3 configuration.",
+                "content": _extension_manifest(project_title, slug),
+            },
+            {
+                "name": "background.js",
+                "kind": "javascript",
+                "summary": "Service worker for the browser extension.",
+                "content": _extension_background(project_title),
+            },
+            {
+                "name": "popup.html",
+                "kind": "html",
+                "summary": "Extension popup HTML.",
+                "content": _extension_popup_html(project_title),
+            },
+            {
+                "name": "popup.js",
+                "kind": "javascript",
+                "summary": "Extension popup logic.",
+                "content": _extension_popup_js(project_title, features),
+            },
+            {
+                "name": "content.js",
+                "kind": "javascript",
+                "summary": "Content script injected into web pages.",
+                "content": _extension_content_js(project_title),
+            },
+            {
+                "name": "src/utils.js",
+                "kind": "javascript",
+                "summary": "Shared utility functions for the extension.",
+                "content": _extension_utils(project_title),
+            },
+        ]
+
+    files = platform_files + common_files
     return files
 
 
@@ -342,6 +576,235 @@ def merge_with_project_artifacts(
     for artifact in gap_fill:
         merged.setdefault(artifact["name"], artifact)
     return [merged[path] for path in sorted(merged)]
+
+
+# ---------------------------------------------------------------------------
+# CLI scaffold helpers
+# ---------------------------------------------------------------------------
+
+def _mobile_package_json(slug: str, project_title: str) -> str:
+    return json.dumps(
+        {
+            "name": slug,
+            "version": "0.1.0",
+            "private": True,
+            "main": "index.js",
+            "scripts": {"start": "expo start", "android": "expo start --android", "ios": "expo start --ios"},
+            "dependencies": {"expo": "~51.0.0", "react": "18.2.0", "react-native": "0.74.0"},
+            "description": project_title,
+        },
+        indent=2,
+    )
+
+
+def _mobile_app_tsx(project_title: str, idea: str, features: list[str]) -> str:
+    feature_line = features[0] if features else idea
+    return (
+        "import { SafeAreaView, Text, View, StyleSheet } from 'react-native';\n\n"
+        f"const TITLE = {json.dumps(project_title)};\n"
+        f"const IDEA = {json.dumps(idea)};\n"
+        f"const FEATURE = {json.dumps(feature_line)};\n\n"
+        "export default function App() {\n"
+        "  return (\n"
+        "    <SafeAreaView style={styles.container}>\n"
+        "      <Text style={styles.title}>{TITLE}</Text>\n"
+        "      <Text style={styles.subtitle}>{FEATURE}</Text>\n"
+        "    </SafeAreaView>\n"
+        "  );\n"
+        "}\n\n"
+        "const styles = StyleSheet.create({ container: { flex: 1, padding: 24 }, title: { fontSize: 24, fontWeight: '700' }, subtitle: { marginTop: 8 } });\n"
+    )
+
+
+def _mobile_index_js() -> str:
+    return (
+        "import { registerRootComponent } from 'expo';\n"
+        "import App from './App';\n\n"
+        "registerRootComponent(App);\n"
+    )
+
+
+def _cli_main(project_title: str, idea: str, features: list[str]) -> str:
+    feat_items = "\n".join(f'    click.echo("  - {f}")' for f in features[:6]) or '    click.echo("  - No features specified.")'
+    return (
+        f'"""CLI entrypoint for {project_title}.\n\n{idea}\n"""\n\n'
+        "import click\n"
+        "from rich.console import Console\n\n"
+        "console = Console()\n\n\n"
+        "@click.group()\n"
+        "@click.version_option(version='0.1.0')\n"
+        "def cli():\n"
+        f'    """Command-line interface for {project_title}."""\n\n\n'
+        "@cli.command()\n"
+        "def info():\n"
+        f'    """Show project information."""\n'
+        f'    console.print("[bold green]{project_title}[/bold green]")\n'
+        f'    console.print("{idea}")\n'
+        "    click.echo(\"\\nFeatures:\")\n"
+        f"{feat_items}\n\n\n"
+        "@cli.command()\n"
+        "@click.argument('input', type=click.Path(exists=True), required=False)\n"
+        "def run(input):\n"
+        '    """Run the primary workflow."""\n'
+        '    console.print("[bold]Running workflow...[/bold]")\n'
+        '    if input:\n'
+        '        console.print(f"Processing: {input}")\n'
+        '    console.print("[green]Done.[/green]")\n\n\n'
+        "if __name__ == '__main__':\n"
+        "    cli()\n"
+    )
+
+
+def _pyproject_toml(slug: str, project_title: str) -> str:
+    safe_slug = slug.replace("-", "_")
+    return (
+        "[build-system]\n"
+        'requires = ["setuptools>=68"]\n'
+        'build-backend = "setuptools.backends.legacy:build"\n\n'
+        "[project]\n"
+        f'name = "{slug}"\n'
+        'version = "0.1.0"\n'
+        f'description = "{project_title} CLI tool"\n'
+        'requires-python = ">=3.11"\n'
+        'dependencies = ["click", "rich"]\n\n'
+        "[project.scripts]\n"
+        f'{slug} = "{safe_slug}.cli.main:cli"\n'
+    )
+
+
+def _cli_tests(project_title: str) -> str:
+    return (
+        "from click.testing import CliRunner\n\n"
+        "from cli.main import cli\n\n\n"
+        "def test_cli_info():\n"
+        "    runner = CliRunner()\n"
+        "    result = runner.invoke(cli, ['info'])\n"
+        "    assert result.exit_code == 0\n"
+        f"    assert {project_title!r} in result.output or result.output\n\n\n"
+        "def test_cli_run_no_input():\n"
+        "    runner = CliRunner()\n"
+        "    result = runner.invoke(cli, ['run'])\n"
+        "    assert result.exit_code == 0\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Browser extension scaffold helpers
+# ---------------------------------------------------------------------------
+
+def _extension_manifest(project_title: str, slug: str) -> str:
+    return json.dumps({
+        "manifest_version": 3,
+        "name": project_title,
+        "version": "0.1.0",
+        "description": f"Browser extension: {project_title}",
+        "permissions": ["activeTab", "storage", "scripting"],
+        "background": {"service_worker": "background.js"},
+        "action": {
+            "default_popup": "popup.html",
+            "default_title": project_title,
+        },
+        "content_scripts": [
+            {
+                "matches": ["<all_urls>"],
+                "js": ["content.js"],
+                "run_at": "document_idle",
+            }
+        ],
+    }, indent=2) + "\n"
+
+
+def _extension_background(project_title: str) -> str:
+    return (
+        f"// Background service worker for {project_title}\n\n"
+        "chrome.runtime.onInstalled.addListener(() => {\n"
+        f"  console.log('{project_title} installed.');\n"
+        "});\n\n"
+        "chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {\n"
+        "  if (message.type === 'GET_STATE') {\n"
+        "    chrome.storage.local.get('state', (data) => sendResponse(data.state || {}));\n"
+        "    return true; // async\n"
+        "  }\n"
+        "  if (message.type === 'SET_STATE') {\n"
+        "    chrome.storage.local.set({ state: message.payload }, () => sendResponse({ ok: true }));\n"
+        "    return true;\n"
+        "  }\n"
+        "});\n"
+    )
+
+
+def _extension_popup_html(project_title: str) -> str:
+    safe_title = _html_escape(project_title)
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '  <meta charset="UTF-8" />\n'
+        f"  <title>{safe_title}</title>\n"
+        '  <style>\n'
+        '    body { font-family: system-ui, sans-serif; width: 320px; padding: 16px; margin: 0; }\n'
+        '    h1 { font-size: 18px; margin: 0 0 12px; }\n'
+        '    button { background: #0f766e; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; font-weight: 700; }\n'
+        '    #status { margin-top: 12px; font-size: 13px; color: #4b5c66; }\n'
+        '  </style>\n'
+        "</head>\n"
+        "<body>\n"
+        f"  <h1>{safe_title}</h1>\n"
+        '  <button id="run">Run</button>\n'
+        '  <div id="status">Ready.</div>\n'
+        '  <script src="popup.js"></script>\n'
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _extension_popup_js(project_title: str, features: list[str]) -> str:
+    feat_list = ", ".join(repr(f) for f in features[:4]) or "'No features yet'"
+    return (
+        f"// Popup script for {project_title}\n\n"
+        f"const FEATURES = [{feat_list}];\n\n"
+        "document.getElementById('run').addEventListener('click', () => {\n"
+        "  const status = document.getElementById('status');\n"
+        "  status.textContent = 'Running...';\n"
+        "  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {\n"
+        "    chrome.tabs.sendMessage(tabs[0].id, { type: 'RUN', features: FEATURES }, (response) => {\n"
+        "      status.textContent = response ? response.message : 'Done.';\n"
+        "    });\n"
+        "  });\n"
+        "});\n"
+    )
+
+
+def _extension_content_js(project_title: str) -> str:
+    return (
+        f"// Content script for {project_title}\n\n"
+        "chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {\n"
+        "  if (message.type === 'RUN') {\n"
+        "    const result = runExtension(message.features || []);\n"
+        "    sendResponse({ message: result });\n"
+        "  }\n"
+        "});\n\n"
+        "function runExtension(features) {\n"
+        "  // TODO: implement extension logic for the active page\n"
+        "  console.log('Extension activated with features:', features);\n"
+        "  return `Processed ${document.querySelectorAll('*').length} elements.`;\n"
+        "}\n"
+    )
+
+
+def _extension_utils(project_title: str) -> str:
+    return (
+        f"// Shared utilities for {project_title}\n\n"
+        "export function getStorage(key) {\n"
+        "  return new Promise((resolve) => chrome.storage.local.get(key, (data) => resolve(data[key])));\n"
+        "}\n\n"
+        "export function setStorage(key, value) {\n"
+        "  return new Promise((resolve) => chrome.storage.local.set({ [key]: value }, resolve));\n"
+        "}\n\n"
+        "export function sendToBackground(type, payload = {}) {\n"
+        "  return new Promise((resolve) => chrome.runtime.sendMessage({ type, payload }, resolve));\n"
+        "}\n"
+    )
 
 
 def _readme(
@@ -544,27 +1007,62 @@ def _react_app(
 
 
 def _api_client(api_routes: list[str]) -> str:
-    del api_routes
-    return (
-        "const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';\n\n"
-        "async function request(path, options = {}) {\n"
-        "  const response = await fetch(`${API_BASE}${path}`, {\n"
-        "    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },\n"
-        "    ...options,\n"
-        "  });\n"
-        "  if (!response.ok) throw new Error(`API ${response.status}: ${path}`);\n"
-        "  return response.json();\n"
-        "}\n\n"
-        "export function createUpload(payload) {\n"
-        "  return request('/api/uploads', { method: 'POST', body: JSON.stringify(payload) });\n"
-        "}\n\n"
-        "export function generateQuiz(payload) {\n"
-        "  return request('/api/quizzes', { method: 'POST', body: JSON.stringify(payload) });\n"
-        "}\n\n"
-        "export function getDashboard() {\n"
-        "  return request('/api/dashboard');\n"
-        "}\n"
-    )
+    """Generate API client functions from the actual planned routes."""
+
+    def route_to_fn(route: str) -> tuple[str, str, str]:
+        parts = route.strip().split(None, 1)
+        method = parts[0].lower() if parts else "get"
+        path = parts[1] if len(parts) > 1 else "/api/health"
+        if path.startswith("/api/"):
+            slug = path[len("/api/") :]
+        elif path.startswith("/"):
+            slug = path[1:]
+        else:
+            slug = path
+        segments = [segment for segment in re.split(r"[/_{}-]+", slug) if segment]
+        if not segments:
+            segments = ["health"]
+        camel = segments[0].lower() + "".join(segment.capitalize() for segment in segments[1:])
+        fn_name = method + camel[0].upper() + camel[1:]
+        return method, path, fn_name
+
+    if not api_routes:
+        api_routes = ["GET /health"]
+
+    fns = []
+    seen: set[str] = set()
+    for route in api_routes[:8]:  # cap at 8 to keep file size reasonable
+        method, path, fn_name = route_to_fn(route)
+        if fn_name in seen:
+            continue
+        seen.add(fn_name)
+        if method in ("post", "put", "patch"):
+            fns.append(
+                f"export async function {fn_name}(data) {{\n"
+                f"  const r = await fetch(`${{BASE_URL}}{path}`, {{\n"
+                f"    method: '{method.upper()}',\n"
+                f"    headers: {{ 'Content-Type': 'application/json' }},\n"
+                f"    body: JSON.stringify(data),\n"
+                f"  }});\n"
+                f"  if (!r.ok) throw new Error(`{fn_name} failed: ${{r.status}}`);\n"
+                f"  return r.json();\n"
+                f"}}\n"
+            )
+        else:
+            fns.append(
+                f"export async function {fn_name}(params = {{}}) {{\n"
+                f"  const qs = new URLSearchParams(params).toString();\n"
+                f"  const url = qs ? `${{BASE_URL}}{path}?${{qs}}` : `${{BASE_URL}}{path}`;\n"
+                f"  const r = await fetch(url);\n"
+                f"  if (!r.ok) throw new Error(`{fn_name} failed: ${{r.status}}`);\n"
+                f"  return r.json();\n"
+                f"}}\n"
+            )
+
+    fn_block = "\n".join(fns)
+    return f"""const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+{fn_block}"""
 
 
 def _frontend_state(project_title: str, features: list[str], user_flows: list[dict[str, Any]], is_study: bool) -> str:
@@ -699,122 +1197,95 @@ def _css() -> str:
     )
 
 
-def _backend_main(project_title: str, idea: str, features: list[str], api_routes: list[str], is_study: bool) -> str:
-    return (
-        '"""FastAPI backend for the generated full-stack project."""\n\n'
-        "from fastapi import FastAPI, UploadFile, File\n\n"
-        "from backend.db import list_activity, save_activity\n"
-        "from backend.models import LoginRequest, QuizRequest, TextAssetRequest\n"
-        "from backend.services import build_dashboard, generate_quiz, parse_uploaded_notes, summarize_text\n\n\n"
+def _backend_main(
+    project_title: str,
+    idea: str,
+    features: list[str],
+    api_routes: list[str],
+    is_study: bool,
+    database_required: bool = True,
+) -> str:
+    del is_study
+    if database_required:
+        imports = (
+            "from backend.db import list_activity, save_activity\n"
+            "from backend.models import TextAssetRequest\n\n\n"
+        )
+    else:
+        imports = "\n"
+    header = (
+        '"""FastAPI backend generated from planned API routes."""\n\n'
+        "from fastapi import FastAPI\n\n"
+        f"{imports}"
         f"app = FastAPI(title={json.dumps(project_title)})\n"
         f"PROJECT_IDEA = {json.dumps(idea)}\n"
         f"PROJECT_FEATURES = {json.dumps(features, indent=2)}\n"
-        f"API_ROUTES = {json.dumps(api_routes, indent=2)}\n"
-        f"IS_STUDY_PROJECT = {json.dumps(is_study)}\n\n\n"
+        f"API_ROUTES = {json.dumps(api_routes, indent=2)}\n\n\n"
         "@app.get('/health')\n"
         "def health() -> dict[str, object]:\n"
-        "    return {'status': 'ok', 'service': app.title, 'routes': len(API_ROUTES)}\n\n\n"
-        "@app.post('/api/auth/login')\n"
-        "def login(payload: LoginRequest) -> dict[str, object]:\n"
-        "    return {'access_token': f'dev-token-{payload.email}', 'user': {'email': payload.email, 'role': payload.role}}\n\n\n"
-        "@app.post('/api/uploads')\n"
-        "def create_upload(payload: TextAssetRequest) -> dict[str, object]:\n"
-        "    asset = parse_uploaded_notes(payload.title, payload.content)\n"
-        "    save_activity({'type': 'upload', 'title': payload.title, 'status': 'parsed'})\n"
-        "    return asset\n\n\n"
-        "@app.post('/api/files/upload')\n"
-        "async def upload_file(file: UploadFile = File(...)) -> dict[str, object]:\n"
-        "    content = (await file.read()).decode('utf-8', errors='replace')\n"
-        "    asset = parse_uploaded_notes(file.filename or 'upload.txt', content)\n"
-        "    save_activity({'type': 'file_upload', 'title': file.filename, 'status': 'parsed'})\n"
-        "    return asset\n\n\n"
-        "@app.post('/api/summaries')\n"
-        "def create_summary(payload: TextAssetRequest) -> dict[str, object]:\n"
-        "    return summarize_text(payload.title, payload.content)\n\n\n"
-        "@app.post('/api/quizzes')\n"
-        "def create_quiz(payload: QuizRequest) -> dict[str, object]:\n"
-        "    quiz = generate_quiz(payload.content, study_mode=IS_STUDY_PROJECT)\n"
-        "    save_activity({'type': 'quiz', 'title': 'Generated quiz', 'status': 'ready'})\n"
-        "    return quiz\n\n\n"
-        "@app.get('/api/flashcards/review')\n"
-        "def flashcard_review() -> dict[str, object]:\n"
-        "    return {'queue': generate_quiz(PROJECT_IDEA, study_mode=True)['flashcards']}\n\n\n"
-        "@app.get('/api/study-plan')\n"
-        "def get_study_plan() -> dict[str, object]:\n"
-        "    return {\n"
-        "        'plan': [\n"
-        "            {'day': 'Monday', 'task': 'Review weak topics', 'minutes': 25},\n"
-        "            {'day': 'Wednesday', 'task': 'Take adaptive quiz', 'minutes': 20},\n"
-        "            {'day': 'Friday', 'task': 'Upload fresh notes and refresh flashcards', 'minutes': 30},\n"
-        "        ],\n"
-        "        'source': PROJECT_IDEA,\n"
-        "    }\n\n\n"
-        "@app.post('/api/study-plan')\n"
-        "def create_study_plan(payload: TextAssetRequest) -> dict[str, object]:\n"
-        "    summary = summarize_text(payload.title, payload.content)\n"
-        "    save_activity({'type': 'study_plan', 'title': payload.title, 'status': 'ready'})\n"
-        "    return {'plan_id': payload.title.lower().replace(' ', '-'), 'summary': summary, 'schedule': get_study_plan()['plan']}\n\n\n"
-        "@app.get('/api/progress')\n"
-        "def progress() -> dict[str, object]:\n"
-        "    activity = list_activity()\n"
-        "    return {'readiness': 86 if IS_STUDY_PROJECT else 78, 'completed_sessions': len(activity), 'cards_due': 12 if IS_STUDY_PROJECT else 0, 'activity': activity[:8]}\n\n\n"
-        "@app.get('/api/dashboard')\n"
-        "def dashboard() -> dict[str, object]:\n"
-        "    return build_dashboard(PROJECT_IDEA, PROJECT_FEATURES, list_activity())\n\n\n"
-        "@app.get('/api/project-plan')\n"
-        "def project_plan() -> dict[str, object]:\n"
-        "    return {'idea': PROJECT_IDEA, 'features': PROJECT_FEATURES, 'api_routes': API_ROUTES}\n"
-        + _dynamic_backend_routes(api_routes)
+        "    return {'status': 'ok', 'service': app.title, 'routes': API_ROUTES}\n"
     )
+    return header + _dynamic_backend_routes(api_routes, database_required=database_required)
 
 
-def _dynamic_backend_routes(api_routes: list[str]) -> str:
-    implemented = {
-        "GET /health",
-        "POST /api/auth/login",
-        "POST /api/uploads",
-        "POST /api/files/upload",
-        "POST /api/summaries",
-        "POST /api/quizzes",
-        "GET /api/flashcards/review",
-        "GET /api/study-plan",
-        "POST /api/study-plan",
-        "GET /api/progress",
-        "GET /api/dashboard",
-        "GET /api/project-plan",
-    }
+def _dynamic_backend_routes(api_routes: list[str], *, database_required: bool = True) -> str:
+    implemented = {"GET /health"}
     blocks: list[str] = []
     used_names: set[str] = set()
     for raw_route in api_routes:
         method, path = _split_api_route(raw_route)
         route_key = f"{method} {path}"
-        if route_key in implemented or not path.startswith("/api/"):
+        if route_key in implemented or path in {"/health"}:
+            continue
+        if not path.startswith("/"):
             continue
         func_name = _route_function_name(method, path)
         while func_name in used_names:
             func_name = f"{func_name}_next"
         used_names.add(func_name)
+        implemented.add(route_key)
         decorator = method.lower()
         if method in {"POST", "PUT", "PATCH"}:
-            body = (
-                f"\n\n@app.{decorator}({path!r})\n"
-                f"def {func_name}(payload: dict[str, object]) -> dict[str, object]:\n"
-                f"    save_activity({{'type': {path!r}, 'title': str(payload.get('title', {path!r})), 'status': 'saved', 'payload': payload}})\n"
-                f"    return {{'route': {path!r}, 'method': {method!r}, 'status': 'saved', 'payload': payload}}\n"
-            )
+            if database_required:
+                body = (
+                    f"\n\n@app.{decorator}({path!r})\n"
+                    f"def {func_name}(payload: dict[str, object]) -> dict[str, object]:\n"
+                    f"    save_activity({{'type': {path!r}, 'title': str(payload.get('title', {path!r})), 'status': 'saved', 'payload': payload}})\n"
+                    f"    return {{'route': {path!r}, 'method': {method!r}, 'status': 'saved', 'payload': payload}}\n"
+                )
+            else:
+                body = (
+                    f"\n\n@app.{decorator}({path!r})\n"
+                    f"def {func_name}(payload: dict[str, object]) -> dict[str, object]:\n"
+                    f"    return {{'route': {path!r}, 'method': {method!r}, 'status': 'ok', 'payload': payload}}\n"
+                )
         elif method == "DELETE":
-            body = (
-                f"\n\n@app.delete({path!r})\n"
-                f"def {func_name}() -> dict[str, object]:\n"
-                f"    save_activity({{'type': {path!r}, 'title': 'deleted record', 'status': 'deleted'}})\n"
-                f"    return {{'route': {path!r}, 'method': 'DELETE', 'status': 'deleted'}}\n"
-            )
+            if database_required:
+                body = (
+                    f"\n\n@app.delete({path!r})\n"
+                    f"def {func_name}() -> dict[str, object]:\n"
+                    f"    save_activity({{'type': {path!r}, 'title': 'deleted record', 'status': 'deleted'}})\n"
+                    f"    return {{'route': {path!r}, 'method': 'DELETE', 'status': 'deleted'}}\n"
+                )
+            else:
+                body = (
+                    f"\n\n@app.delete({path!r})\n"
+                    f"def {func_name}() -> dict[str, object]:\n"
+                    f"    return {{'route': {path!r}, 'method': 'DELETE', 'status': 'deleted'}}\n"
+                )
         else:
-            body = (
-                f"\n\n@app.{decorator}({path!r})\n"
-                f"def {func_name}() -> dict[str, object]:\n"
-                f"    return {{'route': {path!r}, 'method': {method!r}, 'items': list_activity(), 'features': PROJECT_FEATURES[:4]}}\n"
-            )
+            if database_required:
+                body = (
+                    f"\n\n@app.{decorator}({path!r})\n"
+                    f"def {func_name}() -> dict[str, object]:\n"
+                    f"    return {{'route': {path!r}, 'method': {method!r}, 'items': list_activity(), 'features': PROJECT_FEATURES[:4]}}\n"
+                )
+            else:
+                body = (
+                    f"\n\n@app.{decorator}({path!r})\n"
+                    f"def {func_name}() -> dict[str, object]:\n"
+                    f"    return {{'route': {path!r}, 'method': {method!r}, 'features': PROJECT_FEATURES[:4]}}\n"
+                )
         blocks.append(body)
     return "".join(blocks)
 
@@ -940,26 +1411,37 @@ def _backend_db(slug: str) -> str:
     )
 
 
-def _backend_tests(project_title: str, is_study: bool) -> str:
+def _backend_tests(project_title: str, api_routes: list[str]) -> str:
+    route_checks = []
+    for raw_route in api_routes[:4]:
+        method, path = _split_api_route(raw_route)
+        if path == "/health":
+            continue
+        if method == "GET":
+            route_checks.append(
+                f"\n\n"
+                f"def test_get_{_route_function_name(method, path)}():\n"
+                f"    response = client.get({path!r})\n"
+                f"    assert response.status_code == 200\n"
+                f"    assert response.json()['route'] == {path!r}\n"
+            )
+        elif method == "POST":
+            route_checks.append(
+                f"\n\n"
+                f"def test_post_{_route_function_name(method, path)}():\n"
+                f"    response = client.post({path!r}, json={{'title': 'sample'}})\n"
+                f"    assert response.status_code == 200\n"
+                f"    assert response.json()['route'] == {path!r}\n"
+            )
     return (
         "from fastapi.testclient import TestClient\n\n"
-        "from backend.main import app\n"
-        "from backend.services import generate_quiz, parse_uploaded_notes\n\n\n"
+        "from backend.main import app\n\n\n"
         "client = TestClient(app)\n\n\n"
         "def test_health_reports_service():\n"
         "    response = client.get('/health')\n"
         "    assert response.status_code == 200\n"
-        f"    assert response.json()['service'] == {json.dumps(project_title)}\n\n\n"
-        "def test_upload_and_quiz_flow():\n"
-        "    upload = client.post('/api/uploads', json={'title': 'Lecture', 'content': 'Spaced repetition improves exam recall.'})\n"
-        "    assert upload.status_code == 200\n"
-        "    quiz = client.post('/api/quizzes', json={'source_id': upload.json()['id'], 'content': 'Spaced repetition improves exam recall.'})\n"
-        "    assert quiz.status_code == 200\n"
-        "    assert quiz.json()['questions']\n\n\n"
-        "def test_services_generate_domain_assets():\n"
-        "    asset = parse_uploaded_notes('Notes', 'retrieval practice and review cadence')\n"
-        "    assert asset['key_terms']\n"
-        f"    assert generate_quiz('review cadence', study_mode={json.dumps(is_study)})['flashcards']\n"
+        f"    assert response.json()['service'] == {json.dumps(project_title)}\n"
+        + "".join(route_checks)
     )
 
 

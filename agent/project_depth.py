@@ -255,29 +255,21 @@ def depth_profile(depth: str | None) -> dict[str, Any]:
     profiles: dict[str, dict[str, Any]] = {
         "Starter Project": {
             "minimum_features": 4,
-            "requires_auth": False,
-            "requires_database": True,
             "testing_layers": ["unit", "api smoke"],
             "documentation_depth": "setup plus architecture notes",
         },
         "Advanced Project": {
             "minimum_features": 7,
-            "requires_auth": True,
-            "requires_database": True,
             "testing_layers": ["unit", "api integration", "frontend smoke"],
             "documentation_depth": "README, architecture, API, data model, deployment",
         },
         "Production-Style Project": {
             "minimum_features": 10,
-            "requires_auth": True,
-            "requires_database": True,
             "testing_layers": ["unit", "api integration", "validation", "build"],
             "documentation_depth": "production setup, env, architecture, deployment, limitations",
         },
         "Hackathon-Winning Project": {
             "minimum_features": 12,
-            "requires_auth": True,
-            "requires_database": True,
             "testing_layers": ["unit", "api integration", "frontend journey", "build", "demo validation"],
             "documentation_depth": "polished README, architecture, walkthrough, novelty, deployment",
         },
@@ -447,6 +439,8 @@ def enrich_project_requirements(
     idea: str,
     intake: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from agent.project_classifier import apply_profile_to_requirements, classify_project
+
     intake = intake or {}
     explicit_features = _string_list(
         requirements.get("core_features")
@@ -483,6 +477,10 @@ def enrich_project_requirements(
     if not isinstance(api_routes, list) or not api_routes:
         api_routes = default_api_routes(archetype)
 
+    api_routes = requirements.get("api_routes")
+    if not isinstance(api_routes, list) or not api_routes:
+        api_routes = default_api_routes(archetype)
+
     advanced_features = _string_list(requirements.get("advanced_features") or [])
     target_platform = (
         str(requirements.get("target_platform") or intake.get("targetPlatform") or intake.get("target_platform") or "")
@@ -490,7 +488,18 @@ def enrich_project_requirements(
         .lower()
         or "web app"
     )
-    return {
+
+    project_profile = classify_project(idea, intake=intake, requirements=requirements)
+    if requirements.get("auth_required") is None:
+        auth_required = project_profile.auth_required
+    else:
+        auth_required = bool(requirements.get("auth_required"))
+    if requirements.get("database_required") is None:
+        database_required = project_profile.database_required
+    else:
+        database_required = bool(requirements.get("database_required"))
+
+    merged = {
         **requirements,
         "project_depth": depth,
         "project_depth_profile": profile,
@@ -511,10 +520,10 @@ def enrich_project_requirements(
             "User can complete the primary end-to-end workflow",
             "Architecture, setup, testing, and deployment notes are generated",
         ],
-        "auth_required": bool(requirements.get("auth_required", profile["requires_auth"])),
-        "database_required": bool(requirements.get("database_required", profile["requires_database"])),
+        "auth_required": auth_required,
+        "database_required": database_required,
         "data_entities": _string_list(requirements.get("data_entities") or [])
-        or ["users", primary_entity.replace(" ", "_") + "s", "activity_logs"],
+        or (["users", primary_entity.replace(" ", "_") + "s", "activity_logs"] if database_required else []),
         "api_routes": [str(route) for route in api_routes],
         "user_flows": user_flows,
         # Compatibility aliases for legacy workflow/UI keys.
@@ -532,6 +541,7 @@ def enrich_project_requirements(
             or profile.get("summary", "One complete end-to-end workflow")
         ),
     }
+    return apply_profile_to_requirements(merged, project_profile)
 
 
 def project_tabs(archetype: str, idea: str = "") -> list[str]:

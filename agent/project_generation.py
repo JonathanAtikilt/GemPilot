@@ -439,6 +439,8 @@ def ensure_imports_resolve(
     required_features: list[str] | None = None,
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Repair generated code imports without forcing a fixed template structure.
 
@@ -581,6 +583,7 @@ def generate_project_artifacts(
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
     target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, str]]:
     return build_project_artifacts(
         idea=idea,
@@ -593,6 +596,7 @@ def generate_project_artifacts(
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
         target_platform=target_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
 
 
@@ -609,6 +613,7 @@ def merge_scaffold_over_model(
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
     target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Overlay profile-aware implementation files for non-live stage output (mock/test paths).
 
@@ -620,7 +625,11 @@ def merge_scaffold_over_model(
         (project_requirements or {}).get("target_platform")
     )
     priority_paths = get_priority_paths(resolved_platform)
-    gap_paths = get_gap_fill_paths(architecture_plan, target_platform=resolved_platform)
+    gap_paths = get_gap_fill_paths(
+        architecture_plan,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
 
     scaffold = generate_project_artifacts(
         idea=idea,
@@ -633,6 +642,7 @@ def merge_scaffold_over_model(
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
         target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
     by_name: dict[str, dict[str, Any]] = {}
     for artifact in artifacts:
@@ -693,6 +703,7 @@ def hydrate_file_manifest(
     tech_stack_preference: str | None = None,
     project_requirements: dict[str, Any] | None = None,
     target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Start from model artifacts; gap-fill universal/docs paths only when missing."""
 
@@ -701,7 +712,11 @@ def hydrate_file_manifest(
     resolved_platform = target_platform or (
         (project_requirements or {}).get("target_platform")
     )
-    gap_paths = get_gap_fill_paths(architecture_plan, target_platform=resolved_platform)
+    gap_paths = get_gap_fill_paths(
+        architecture_plan,
+        target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
 
     scaffold = generate_project_artifacts(
         idea=idea,
@@ -714,6 +729,7 @@ def hydrate_file_manifest(
         tech_stack_preference=tech_stack_preference,
         project_requirements=project_requirements,
         target_platform=resolved_platform,
+        is_hackathon_mode=is_hackathon_mode,
     )
     scaffold_by_name = {str(a["name"]): dict(a) for a in scaffold}
 
