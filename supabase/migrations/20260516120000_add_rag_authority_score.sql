@@ -4,7 +4,7 @@ alter table public.rag_chunks
 update public.rag_chunks
 set authority_score = case doc_type
   when 'hackathon_rules' then 1.0
-  when 'nvidia_docs' then 0.95
+  when 'ai_provider_docs' then 0.95
   when 'generated_project_doc' then 0.85
   when 'build_log' then 0.75
   when 'team_notes' then 0.5
@@ -16,7 +16,7 @@ create index if not exists rag_chunks_authority_score_idx on public.rag_chunks (
 drop function if exists public.match_rag_chunks(extensions.vector, integer, double precision, text[]);
 
 create function public.match_rag_chunks(
-  query_embedding extensions.vector(2048),
+  query_embedding extensions.vector(768),
   match_count int default 10,
   match_threshold float default -1,
   filter_doc_types text[] default null

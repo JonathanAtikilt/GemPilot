@@ -1,40 +1,71 @@
 import os
 from pathlib import Path
+from typing import Literal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAG_SOURCES_DIR = PROJECT_ROOT / "rag" / "sources"
 LOGS_DIR = PROJECT_ROOT / "logs"
 
-DEFAULT_NVIDIA_EMBED_MODEL = "llama-nemotron-embed-1b-v2"
-DEFAULT_NVIDIA_RERANK_MODEL = "llama-nemotron-rerank-1b-v2"
-NVIDIA_EMBEDDING_URL = os.getenv(
-    "NVIDIA_EMBEDDING_URL",
-    "https://integrate.api.nvidia.com/v1/embeddings",
-)
+EmbeddingProvider = Literal["gemini", "openai"]
+
+DEFAULT_GEMINI_EMBED_MODEL = "gemini-embedding-001"
+DEFAULT_OPENAI_EMBED_MODEL = "text-embedding-3-small"
+DEFAULT_EMBEDDING_DIMENSIONS = 768
+GEMINI_API_BASE_URL = os.getenv(
+    "GEMINI_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta",
+).rstrip("/")
+OPENAI_API_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 
 
-def get_nvidia_api_key() -> str | None:
-    return os.getenv("NVIDIA_API_KEY", "").strip() or None
+def get_gemini_api_key() -> str | None:
+    return os.getenv("GEMINI_API_KEY", "").strip() or None
+
+
+def get_openai_api_key() -> str | None:
+    return os.getenv("OPENAI_API_KEY", "").strip() or None
+
+
+def get_embedding_provider() -> EmbeddingProvider:
+    configured = os.getenv("EMBEDDING_PROVIDER", "").strip().lower()
+    if configured in {"gemini", "openai"}:
+        return configured  # type: ignore[return-value]
+
+    model = os.getenv("EMBEDDING_MODEL", "").strip().lower()
+    if model.startswith("text-embedding"):
+        return "openai"
+    if model.startswith("gemini"):
+        return "gemini"
+
+    llm_provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+    if llm_provider == "openai":
+        return "openai"
+    return "gemini"
 
 
 def get_embedding_model() -> str:
-    return os.getenv("NVIDIA_EMBED_MODEL", DEFAULT_NVIDIA_EMBED_MODEL).strip()
+    configured = os.getenv("EMBEDDING_MODEL", "").strip()
+    if configured:
+        return configured
+    return (
+        DEFAULT_OPENAI_EMBED_MODEL
+        if get_embedding_provider() == "openai"
+        else DEFAULT_GEMINI_EMBED_MODEL
+    )
 
 
-def get_rerank_model() -> str:
-    return os.getenv("NVIDIA_RERANK_MODEL", DEFAULT_NVIDIA_RERANK_MODEL).strip()
+def get_embedding_dimensions() -> int:
+    value = os.getenv("EMBEDDING_DIMENSIONS", "").strip()
+    if not value:
+        return DEFAULT_EMBEDDING_DIMENSIONS
+    return int(value)
 
 
-def normalize_nvidia_model_id(model: str) -> str:
-    return model if "/" in model else f"nvidia/{model}"
-
-
-def get_rerank_url() -> str:
-    model = normalize_nvidia_model_id(get_rerank_model())
-    return os.getenv(
-        "NVIDIA_RERANK_URL",
-        f"https://ai.api.nvidia.com/v1/retrieval/{model}/reranking",
-    ).strip()
+def get_embedding_api_key() -> str | None:
+    provider = get_embedding_provider()
+    if provider == "openai":
+        return get_openai_api_key()
+    return get_gemini_api_key()
 
 
 def get_supabase_url() -> str | None:

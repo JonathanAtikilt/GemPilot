@@ -31,14 +31,14 @@ def detect_doc_type(source: str) -> DocType:
     if name.startswith("http://") or name.startswith("https://"):
         if "shortesthack" in name or "hackathon" in name:
             return "hackathon_rules"
-        if "nvidia.com" in name or "integrate.api.nvidia" in name:
-            return "nvidia_docs"
+        if any(provider in name for provider in ("ai.google.dev", "cloud.google.com/vertex-ai", "console.groq.com", "platform.openai.com")):
+            return "ai_provider_docs"
         return "generated_project_doc"
 
     if "hackathon" in name or "rules" in name:
         return "hackathon_rules"
-    if "nvidia" in name or "nemotron" in name:
-        return "nvidia_docs"
+    if any(provider in name for provider in ("gemini", "groq", "openai", "llm_provider", "provider_models")):
+        return "ai_provider_docs"
     if "team" in name or "notes" in name:
         return "team_notes"
     if "build_log" in name or "/logs/" in name or name.startswith("logs/"):

@@ -5,10 +5,11 @@ from fastapi.testclient import TestClient
 
 def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
     for key in (
-        "NVIDIA_API_KEY",
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENAI_API_KEY",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
-        "OPENCLAW_API_KEY",
         "GITHUB_TOKEN",
         "GITHUB_OWNER",
         "GITHUB_OAUTH_CLIENT_ID",
@@ -18,6 +19,7 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
         "GITHUB_CLIENT_SECRET",
         "GITHUB_REDIRECT_URI",
         "GITHUB_TOKEN_ENCRYPTION_KEY",
+        "REQUIRE_LIVE_FILE_MANIFEST",
     ):
         monkeypatch.delenv(key, raising=False)
     app = create_app(settings=Settings(_env_file=None, adapter_mode="mock"))
@@ -30,17 +32,15 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
     assert data["status"] == "ok"
     assert data["adapter_mode"] == "mock"
     assert data["mock_mode"] is True
-    assert data["nemotron_model"] == "nvidia/nemotron-3-super-120b-a12b"
-    assert data["nemotron_fast_model"] == "nvidia/nvidia-nemotron-nano-9b-v2"
-    assert data["nvidia_configured"] is False
-    assert data["openclaw_configured"] is False
-    assert data["openclaw_env"] is None
-    assert data["openclaw_runtime_ready"] is False
-    assert data["openclaw_registered_tools"] == []
+    assert data["llm_provider"] == "gemini"
+    assert data["llm_model"] == "gemini-2.5-flash"
+    assert data["llm_configured"] is False
+    assert data["runtime"] == "langgraph"
+    assert data["registered_tools"] == []
     assert data["supabase_configured"] is False
     assert data["rag_configured"] is False
     assert data["rag_missing_env"] == [
-        "NVIDIA_API_KEY",
+        "GEMINI_API_KEY",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
     ]
@@ -52,12 +52,11 @@ def test_health_returns_mock_defaults_without_secret_values(monkeypatch):
     )
     assert data["service"] == "mvpilot-agent"
     assert data["require_live_file_manifest"] is True
-    assert "fake-nvidia" not in response.text
-    assert "fake-openclaw" not in response.text
+    assert "fake-google-ai" not in response.text
 
 
-def test_health_is_degraded_when_live_mode_lacks_nvidia_config(monkeypatch):
-    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+def test_health_is_degraded_when_live_mode_lacks_llm_config(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     app = create_app(settings=Settings(_env_file=None, adapter_mode="live"))
 
     with TestClient(app) as client:
@@ -69,15 +68,14 @@ def test_health_is_degraded_when_live_mode_lacks_nvidia_config(monkeypatch):
 
 def test_settings_load_from_environment_without_requiring_real_keys(monkeypatch):
     monkeypatch.setenv("ADAPTER_MODE", "live")
-    monkeypatch.setenv("NVIDIA_API_KEY", "fake-nvidia-key")
-    monkeypatch.setenv("OPENCLAW_API_KEY", "fake-openclaw-key")
-    monkeypatch.setenv("NEMOTRON_MODEL", "nvidia/custom-model")
-    monkeypatch.setenv("NEMOTRON_FAST_MODEL", "nvidia/custom-fast-model")
-    monkeypatch.setenv("NEMOTRON_BASE_URL", "https://example.test/v1")
-    monkeypatch.setenv("NEMOTRON_TIMEOUT_SECONDS", "12")
-    monkeypatch.setenv("NEMOTRON_MAX_RETRIES", "2")
-    monkeypatch.setenv("NEMOTRON_POLL_ATTEMPTS", "4")
-    monkeypatch.setenv("NEMOTRON_POLL_INTERVAL_SECONDS", "0.5")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-google-ai-key")
+    monkeypatch.setenv("LLM_MODEL", "gemini-custom-model")
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
+    monkeypatch.setenv("GEMINI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("LLM_MAX_RETRIES", "2")
+    monkeypatch.setenv("LLM_POLL_ATTEMPTS", "4")
+    monkeypatch.setenv("LLM_POLL_INTERVAL_SECONDS", "0.5")
     monkeypatch.setenv(
         "CORS_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
@@ -86,28 +84,25 @@ def test_settings_load_from_environment_without_requiring_real_keys(monkeypatch)
     settings = Settings(_env_file=None)
 
     assert settings.adapter_mode == "live"
-    assert settings.nemotron_model == "nvidia/custom-model"
-    assert settings.nemotron_fast_model == "nvidia/custom-fast-model"
-    assert str(settings.nemotron_base_url) == "https://example.test/v1"
-    assert settings.nemotron_timeout_seconds == 12
-    assert settings.nemotron_max_retries == 2
-    assert settings.nemotron_poll_attempts == 4
-    assert settings.nemotron_poll_interval_seconds == 0.5
+    assert settings.llm_model_name == "gemini-custom-model"
+    assert settings.llm_fallback_model_name == "llama-3.1-8b-instant"
+    assert str(settings.gemini_base_url) == "https://example.test/v1"
+    assert settings.llm_timeout_seconds == 12
+    assert settings.llm_max_retries == 2
+    assert settings.llm_poll_attempts == 4
+    assert settings.llm_poll_interval_seconds == 0.5
     assert settings.cors_origins == [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
-    assert settings.nvidia_configured is True
-    assert settings.openclaw_configured is True
-    assert "fake-nvidia-key" not in settings.model_dump_json()
+    assert settings.llm_configured is True
+    assert "fake-google-ai-key" not in settings.model_dump_json()
 
 
-def test_health_reports_rag_configured_when_supabase_and_nvidia_set(monkeypatch):
-    monkeypatch.setenv("NVIDIA_API_KEY", "fake-nvidia-key")
+def test_health_reports_rag_configured_when_supabase_and_gemini_set(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-google-ai-key")
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role")
-    monkeypatch.setenv("OPENCLAW_API_KEY", "fake-openclaw-key")
-    monkeypatch.setenv("OPENCLAW_ENV", "development")
 
     app = create_app(settings=Settings(_env_file=None, adapter_mode="mock"))
 
@@ -119,6 +114,5 @@ def test_health_reports_rag_configured_when_supabase_and_nvidia_set(monkeypatch)
     assert data["rag_missing_env"] == []
     assert data["rag_live_ready"] is True
     assert data["supabase_configured"] is True
-    assert data["openclaw_env"] == "development"
-    assert data["openclaw_runtime_ready"] is True
-    assert "github.create_repo" in data["openclaw_registered_tools"]
+    assert data["runtime"] == "langgraph"
+    assert data["registered_tools"] == []

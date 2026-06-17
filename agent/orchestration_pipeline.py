@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from agent.build_timeline import BUILD_TIMELINE_PHASES, apply_timeline_events, timeline_event
-from agent.project_agents import PROJECT_AGENTS, agent_name, project_agent_manifest
+from agent.project_agents import agent_name, project_agent_manifest
 
 TimelineStatus = Literal["pending", "running", "completed", "failed"]
 
@@ -90,7 +90,6 @@ def append_agent_logs(
 
 
 def record_phases(
-    orchestrator: Any,
     state: dict[str, Any],
     *events: tuple[str, TimelineStatus, str, list[str] | None],
 ) -> dict[str, Any]:
@@ -131,5 +130,3 @@ def agent_for_node(node_name: str) -> str:
     return agent_name(NODE_AGENT_KEYS.get(node_name, "logger"))
 
 
-def list_project_agents() -> tuple[Any, ...]:
-    return PROJECT_AGENTS

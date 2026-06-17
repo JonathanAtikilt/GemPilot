@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -21,6 +22,10 @@ GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_OAUTH_SCOPE = "repo read:user user:email"
+GITHUB_STORE_MEMORY = "memory"
+GITHUB_STORE_SUPABASE = "supabase"
+
+logger = logging.getLogger(__name__)
 
 ConnectionStatus = Literal["pending", "ready", "exchanged", "failed"]
 
@@ -172,6 +177,32 @@ class SupabaseGitHubConnectionStore:
         error = getattr(response, "error", None)
         if error:
             raise GitHubOAuthError(f"Failed to {action}.")
+
+    def ping(self) -> None:
+        try:
+            self._client.table("github_connections").select("id").limit(1).execute()
+        except Exception as exc:
+            raise GitHubOAuthError(
+                "Supabase is unreachable for GitHub connections."
+            ) from exc
+
+
+def build_github_connection_store(
+    settings: Settings,
+) -> tuple[InMemoryGitHubConnectionStore | SupabaseGitHubConnectionStore, str]:
+    if settings.adapter_mode != "live" or not settings.supabase_configured:
+        return InMemoryGitHubConnectionStore(), GITHUB_STORE_MEMORY
+
+    try:
+        store = SupabaseGitHubConnectionStore(settings)
+        store.ping()
+        return store, GITHUB_STORE_SUPABASE
+    except Exception as exc:
+        logger.warning(
+            "Supabase unreachable for GitHub connections; using in-memory store: %s",
+            exc,
+        )
+        return InMemoryGitHubConnectionStore(), GITHUB_STORE_MEMORY
 
 
 class GitHubConnectionService:
@@ -510,7 +541,7 @@ class GitHubConnectionService:
                 headers={
                     "Accept": "application/vnd.github+json",
                     "Authorization": f"Bearer {token}",
-                    "User-Agent": "MVPilot-Agent",
+                    "User-Agent": "GemPilot/1.0",
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
             )

@@ -2,7 +2,7 @@
 
 ## Context
 
-This template is designed for a hackathon project where the deliverable is a deployed, working autonomous agent application using OpenClaw and NVIDIA Nemotron models.
+This template is designed for a hackathon project where the deliverable is a deployed, working autonomous agent application using LangGraph and Google AI Gemini models.
 
 The strongest project shape is not just a chatbot. It should be an agent that:
 
@@ -126,7 +126,7 @@ The final report should include:
                                     │
                                     ▼
                         ┌─────────────────────────┐
-                        │     OpenClaw Agent       │
+                        │     LangGraph Agent       │
                         │  Planner + Controller    │
                         └───────────┬─────────────┘
                                     │
@@ -141,7 +141,7 @@ The final report should include:
             └──────────────────────┼──────────────────────┘
                                    ▼
                          ┌──────────────────┐
-                         │ NVIDIA Nemotron  │
+                         │ Google AI Gemini  │
                          │ Reasoning Model  │
                          └────────┬─────────┘
                                   │
@@ -201,12 +201,12 @@ Avoid making the user manually drive every step.
 
 ## 3.2 Agent Orchestration Layer
 
-The OpenClaw agent should coordinate the workflow.
+The LangGraph agent should coordinate the workflow.
 
 Recommended internal structure:
 
 ```text
-OpenClaw Agent
+LangGraph Agent
    ├── Planner
    ├── Tool Router
    ├── Memory Manager
@@ -222,7 +222,7 @@ The agent should not only answer questions. It should plan, use tools, act, veri
 
 ## 3.3 Model Layer
 
-Use NVIDIA Nemotron as the reasoning model.
+Use Google AI Gemini as the reasoning model.
 
 Responsibilities:
 
@@ -236,8 +236,8 @@ Responsibilities:
 Recommended pattern:
 
 ```text
-Nemotron does reasoning.
-OpenClaw handles agent execution.
+Gemini does reasoning.
+LangGraph handles agent execution.
 Tools provide real-world access.
 Memory provides continuity.
 RAG provides enterprise knowledge.
@@ -542,7 +542,7 @@ Frontend:
    Simple web app, Slack bot, or CLI
 
 Agent:
-   OpenClaw + Nemotron
+   LangGraph + Gemini
 
 RAG:
    Small set of enterprise docs, policies, or runbooks
@@ -588,15 +588,15 @@ Do not submit only a notebook, static demo, or pitch deck.
 
 ---
 
-## 5.2 OpenClaw Agent
+## 5.2 LangGraph Agent
 
-The project should clearly use OpenClaw as the agent framework.
+The project should clearly use LangGraph as the agent framework.
 
 ---
 
-## 5.3 NVIDIA Nemotron Model
+## 5.3 Google AI Gemini Model
 
-The project should use Nemotron for reasoning, planning, summarization, or decision-making.
+The project should use Gemini for reasoning, planning, summarization, or decision-making.
 
 ---
 
@@ -874,8 +874,8 @@ Use this structure for almost any idea:
 Use this before committing to an idea.
 
 ```text
-Does it use OpenClaw?                         Required
-Does it use Nemotron?                         Required
+Does it use LangGraph?                         Required
+Does it use Gemini?                         Required
 Is it deployed and runnable?                  Required
 Does it use persistent memory?                Required
 Does it perform multi-step reasoning?         Required
@@ -897,7 +897,7 @@ Can judges understand it in 3 minutes?        Critical
 
 Use this sentence to guide your project:
 
-> Build an OpenClaw + Nemotron agent that handles a real enterprise workflow by using live tools, RAG, persistent memory, approval gates, verification, audit logs, and a clear security story.
+> Build an LangGraph + Gemini agent that handles a real enterprise workflow by using live tools, RAG, persistent memory, approval gates, verification, audit logs, and a clear security story.
 
 A strong project is not:
 
@@ -917,8 +917,8 @@ A strong project is:
 
 ## Agent Runtime
 
-- OpenClaw
-- NVIDIA Nemotron
+- LangGraph
+- Google AI Gemini
 
 ## Memory
 
@@ -996,7 +996,7 @@ Better:
 ```text
 Enterprise Trigger
    ↓
-OpenClaw Agent
+LangGraph Agent
    ↓
 Retrieve from RAG
    ↓
@@ -1004,7 +1004,7 @@ Retrieve from Persistent Memory
    ↓
 Use Live Tools
    ↓
-Reason with Nemotron
+Reason with Gemini
    ↓
 Apply Policy / Approval Rules
    ↓

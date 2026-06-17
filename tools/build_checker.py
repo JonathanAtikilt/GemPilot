@@ -1,4 +1,4 @@
-"""Repo health checks for generated MVP repositories."""
+"""Repo health checks for generated full-stack project repositories."""
 
 from __future__ import annotations
 
@@ -11,25 +11,38 @@ from tools.schemas import RepoHealthResult, ToolResult
 README_FILES = ["README.md"]
 BUILD_LOG_FILES = ["docs/BUILD_LOG.md", "logs/build_log.md"]
 DEMO_SCRIPT_FILES = [
+    "demo/script.md",
     "demo/demo_script.md",
     "demo_script.md",
     "docs/WALKTHROUGH.md",
+]
+DEMO_MATERIAL_FILES = [
+    "demo/script.md",
+    "demo/storyboard.md",
+    "demo/demo_walkthrough.md",
+    "demo/video_outline.md",
 ]
 ARCHITECTURE_FILES = ["docs/ARCHITECTURE.md"]
 PACKAGE_FILES = ["package.json", "requirements.txt"]
 SOURCE_PREFIXES = ["src/", "backend/"]
 
 REPO_HEALTH_SCAFFOLD: dict[str, str] = {
-    "README.md": "# Generated MVP\n\nTailored scaffold for the submitted idea.\n",
-    "docs/BUILD_LOG.md": "# Build Log\n\n- Repository scaffold created by MVPilot.\n",
-    "docs/ARCHITECTURE.md": "# Architecture\n\nIdea-specific MVP structure and integration notes.\n",
-    "demo/demo_script.md": "# Demo Script\n\n1. Run the app.\n2. Show the core workflow.\n",
+    "README.md": "# Generated Full-Stack Project\n\nTailored hackathon-ready project package for the submitted idea.\n",
+    "docs/BUILD_LOG.md": "# Build Log\n\n- Repository package created by GemPilot.\n",
+    "docs/ARCHITECTURE.md": "# Architecture\n\nIdea-specific full-stack project structure and integration notes.\n",
+    "docs/HACKATHON_SUBMISSION.md": "# Hackathon Submission\n\nComplete project summary, demo flow, and judging proof.\n",
+    "demo/script.md": "# Demo Script\n\n1. Run the app.\n2. Show the core workflow.\n",
+    "demo/storyboard.md": "# Storyboard\n\n| Shot | Screen | Proof |\n| --- | --- | --- |\n| 1 | Dashboard | Complete project flow |\n",
+    "demo/demo_walkthrough.md": "# Demo Walkthrough\n\n1. Start frontend and backend.\n2. Complete the product workflow.\n",
+    "demo/video_outline.md": "# Video Outline\n\n- Hook\n- Product proof\n- Technical proof\n- Close\n",
+    "data/seed.json": "{\n  \"records\": []\n}\n",
+    "scripts/seed_data.py": "from backend.db import save_activity\n\n\ndef main():\n    save_activity({'type': 'seed', 'title': 'Demo seed', 'status': 'ready'})\n\n\nif __name__ == '__main__':\n    main()\n",
     "requirements.txt": "fastapi\nuvicorn\npytest\n",
     "src/__init__.py": "",
     "src/app.py": (
-        '"""MVPilot generated entrypoint."""\n\n\n'
+        '"""GemPilot generated full-stack project entrypoint."""\n\n\n'
         "def main() -> None:\n"
-        '    print("Generated MVP entrypoint")\n\n\n'
+        '    print("Generated full-stack project entrypoint")\n\n\n'
         'if __name__ == "__main__":\n'
         "    main()\n"
     ),
@@ -37,43 +50,75 @@ REPO_HEALTH_SCAFFOLD: dict[str, str] = {
 
 
 def idea_repo_health_scaffold(*, title: str, idea: str) -> dict[str, str]:
-    """Fill only missing health-check paths with idea-specific stubs."""
+    """Fill only missing health-check paths with idea-specific full-project fallbacks."""
 
-    label = (title or "Generated MVP").strip()
-    idea_line = " ".join((idea or "the submitted MVP idea").split())
+    label = (title or "Generated Full-Stack Project").strip()
+    idea_line = " ".join((idea or "the submitted full-stack project idea").split())
     if len(idea_line) > 240:
         idea_line = f"{idea_line[:237].rstrip()}..."
 
     return {
         "README.md": (
             f"# {label}\n\n"
-            f"MVPilot generated this package for: {idea_line}\n\n"
-            "See docs/ARCHITECTURE.md and docs/BUILD_LOG.md for planning evidence.\n"
+            f"GemPilot generated this complete hackathon-ready full-stack project package for: {idea_line}\n\n"
+            "See docs/ARCHITECTURE.md, docs/BUILD_LOG.md, docs/HACKATHON_SUBMISSION.md, and demo/ for planning and demo evidence.\n"
         ),
         "docs/BUILD_LOG.md": (
             f"# Build Log\n\n"
-            f"- Scoped MVP: {label}\n"
+            f"- Scoped full-stack project: {label}\n"
             f"- Idea: {idea_line}\n"
-            "- Health-check scaffold paths filled where the model omitted files.\n"
+            "- Health-check fallback paths filled where the model omitted files.\n"
         ),
         "docs/ARCHITECTURE.md": (
             f"# Architecture\n\n"
             f"## {label}\n\n"
             f"Core concept: {idea_line}\n\n"
-            "Frontend, API modules, and mock integrations are generated from the scoped MVP plan.\n"
+            "Frontend, backend API modules, database schema, sample data, tests, and demo materials are generated from the scoped full-stack project plan.\n"
         ),
-        "demo/demo_script.md": (
-            f"# Demo Script — {label}\n\n"
+        "docs/HACKATHON_SUBMISSION.md": (
+            f"# Hackathon Submission — {label}\n\n"
+            f"Problem and solution: {idea_line}\n\n"
+            "This package includes source, tests, setup, deployment notes, and demo video materials.\n"
+        ),
+        "demo/script.md": (
+            f"# Demo Script - {label}\n\n"
             f"1. Open with the idea: {idea_line}\n"
             "2. Walk through the primary UI workflow.\n"
-            "3. Show mock API/data labeled in the UI.\n"
+            "3. Show backend API/data and the generated README/demo docs.\n"
+        ),
+        "demo/storyboard.md": (
+            f"# Storyboard - {label}\n\n"
+            "| Shot | Screen | Proof |\n| --- | --- | --- |\n"
+            f"| 1 | Dashboard | {idea_line} |\n"
+        ),
+        "demo/demo_walkthrough.md": (
+            f"# Demo Walkthrough - {label}\n\n"
+            "1. Start the backend and frontend.\n2. Load sample data.\n3. Complete the primary workflow.\n"
+        ),
+        "demo/video_outline.md": (
+            f"# Video Outline - {label}\n\n"
+            "- Hook\n- Product workflow\n- Technical proof\n- Hackathon close\n"
+        ),
+        "data/seed.json": (
+            "{\n"
+            f"  \"project\": \"{label}\",\n"
+            f"  \"idea\": \"{idea_line}\",\n"
+            "  \"records\": []\n"
+            "}\n"
+        ),
+        "scripts/seed_data.py": (
+            "from backend.db import save_activity\n\n\n"
+            "def main():\n"
+            f"    save_activity({{'type': 'seed', 'title': {label!r}, 'status': 'ready'}})\n\n\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
         ),
         "requirements.txt": "fastapi\nuvicorn\npytest\n",
         "src/__init__.py": "",
         "src/app.py": (
             f'"""API entrypoint for {label}."""\n\n\n'
             "def main() -> None:\n"
-            f'    print("Serving partial MVP scaffold for: {label}")\n\n\n'
+            f'    print("Serving full-stack project package for: {label}")\n\n\n'
             'if __name__ == "__main__":\n'
             "    main()\n"
         ),
@@ -92,6 +137,10 @@ def _has_demo_script(files: set[str]) -> bool:
     return any(path in files for path in DEMO_SCRIPT_FILES)
 
 
+def _has_demo_materials(files: set[str]) -> bool:
+    return all(path in files for path in DEMO_MATERIAL_FILES)
+
+
 def _has_package_manifest(files: set[str]) -> bool:
     return any(path in files for path in PACKAGE_FILES)
 
@@ -105,7 +154,7 @@ def merge_repo_health_scaffold(
     """Ensure committed files satisfy repo health checks."""
 
     scaffold = (
-        idea_repo_health_scaffold(title=title or "Generated MVP", idea=idea or "")
+        idea_repo_health_scaffold(title=title or "Generated Full-Stack Project", idea=idea or "")
         if (idea or title)
         else REPO_HEALTH_SCAFFOLD
     )
@@ -128,7 +177,7 @@ def merge_repo_health_scaffold(
             continue
         if path in BUILD_LOG_FILES and _has_build_log(paths):
             continue
-        if path in DEMO_SCRIPT_FILES and _has_demo_script(paths):
+        if path in DEMO_SCRIPT_FILES and path not in DEMO_MATERIAL_FILES and _has_demo_script(paths):
             continue
         if path in PACKAGE_FILES and _has_package_manifest(paths):
             continue
@@ -145,6 +194,7 @@ def _health_result(repo_name: str, files: set[str], commit_count: int) -> dict:
         "build log exists": _has_build_log(files),
         "architecture doc exists": any(path in files for path in ARCHITECTURE_FILES),
         "demo script exists": _has_demo_script(files),
+        "demo materials exist": _has_demo_materials(files),
         "package.json or requirements.txt exists": _has_package_manifest(files),
         "src/ or backend/ exists": _has_any_file_with_prefix(files, SOURCE_PREFIXES),
         "at least one commit exists": commit_count > 0,
@@ -201,7 +251,17 @@ def check_repo_health(
     errors: list[str] = []
     try:
         client.get_repo(repo_name)
-        for path in README_FILES + BUILD_LOG_FILES + DEMO_SCRIPT_FILES + ARCHITECTURE_FILES + PACKAGE_FILES:
+        paths_to_check = list(
+            dict.fromkeys(
+                README_FILES
+                + BUILD_LOG_FILES
+                + DEMO_SCRIPT_FILES
+                + DEMO_MATERIAL_FILES
+                + ARCHITECTURE_FILES
+                + PACKAGE_FILES
+            )
+        )
+        for path in paths_to_check:
             try:
                 client.get_contents(repo_name, path)
                 files.add(path)

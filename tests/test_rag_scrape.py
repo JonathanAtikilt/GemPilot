@@ -32,7 +32,7 @@ DETAILS_HTML = """
   <head><title>Rule Details</title></head>
   <body>
     <p>Submission deadline and judging criteria for the hackathon demo.</p>
-    <p>Teams must show a working MVP, document architecture decisions, and cite NVIDIA model usage.</p>
+    <p>Teams must show a working MVP, document architecture decisions, and cite Google AI model usage.</p>
   </body>
 </html>
 """
@@ -105,7 +105,7 @@ async def test_scrape_configured_urls_reads_env_and_file(monkeypatch, tmp_path) 
     scrape_file = tmp_path / "scrape_urls.txt"
     scrape_file.write_text("# comment\nhttps://hackathon.example.com/rules\n", encoding="utf-8")
 
-    monkeypatch.setenv("RAG_SCRAPE_URLS", "https://nvidia.example.com/models,")
+    monkeypatch.setenv("RAG_SCRAPE_URLS", "https://google-ai.example.com/models,")
     monkeypatch.setattr(rag_config, "RAG_SCRAPE_URLS_FILE", scrape_file)
 
     async def fake_scrape_seed_page(client, seed_url: str) -> list[SourceDocument]:
@@ -124,6 +124,6 @@ async def test_scrape_configured_urls_reads_env_and_file(monkeypatch, tmp_path) 
     documents = await scrape_configured_urls()
 
     assert {document.source for document in documents} == {
-        "https://nvidia.example.com/models",
+        "https://google-ai.example.com/models",
         "https://hackathon.example.com/rules",
     }

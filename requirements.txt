@@ -1,11 +1,12 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
 pydantic
+pydantic-settings
 python-multipart
 supabase
 httpx
 certifi
 cryptography
 beautifulsoup4
-pytest
+langgraph

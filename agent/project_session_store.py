@@ -67,9 +67,9 @@ class SupabasePersistingTaskStore:
                     "idea": task.idea,
                     "project_depth": request.project_depth,
                     "target_platform": request.target_platform,
-                    "orchestration_mode": "openclaw"
-                    if request.use_openclaw_orchestration
-                    else "langgraph",
+                    "orchestration_mode": "langgraph"
+                    if request.use_runtime_orchestration
+                    else "manual",
                     "status": task.status,
                     "project_plan": {},
                     "recommended_stack": {},
@@ -103,6 +103,13 @@ class SupabasePersistingTaskStore:
         except Exception as exc:
             logger.warning("Failed to persist snapshot for %s: %s", task_id, exc)
         return detail
+
+    async def append_agent_steps(
+        self,
+        task_id: str,
+        steps: list[Any],
+    ) -> TaskDetailResponse:
+        return await self._memory.append_agent_steps(task_id, steps)
 
     def _persist_snapshot(
         self,

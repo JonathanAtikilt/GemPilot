@@ -27,14 +27,14 @@ from agent.model_client import (
 )
 from agent.idea_context import title_from_idea as _idea_label
 from agent.model_outputs import (
+    ArchitecturePlanOutput,
     BlockerAnalysisOutput,
-    DemoScriptOutput,
     FileManifestOutput,
     FinalReadmeOutput,
-    MvpScopeOutput,
     PitchOutput,
+    ProjectRequirementsOutput,
     RecommendedStackOutput,
-    RepoPlanOutput,
+    WalkthroughOutput,
 )
 from agent.stack_recommendation import (
     align_architecture_plan_with_recommended_stack,
@@ -136,7 +136,7 @@ class IdeaAwarePartialClient:
                         reason,
                         [
                             f"Explicit degraded generation for: {_idea_label(idea)}",
-                            "Expanded features from intake and plan because live Nemotron was unavailable.",
+                            "Expanded features from intake and plan because the live LLM was unavailable.",
                             "Kept requirements specific to the submitted idea rather than a generic starter app.",
                         ],
                     ),
@@ -150,11 +150,11 @@ class IdeaAwarePartialClient:
                 reason,
                 [
                     f"Explicit degraded generation for: {_idea_label(idea)}",
-                    "Expanded features from intake and plan because live Nemotron was unavailable.",
+                    "Expanded features from intake and plan because the live LLM was unavailable.",
                     "Kept requirements specific to the submitted idea rather than a generic starter app.",
                 ],
             )
-            return MvpScopeOutput.model_validate(requirements_payload).model_dump()
+            return ProjectRequirementsOutput.model_validate(requirements_payload).model_dump()
 
         if purpose == "recommend_stack":
             payload = recommend_stack_heuristic(
@@ -169,7 +169,7 @@ class IdeaAwarePartialClient:
                 [
                     f"Explicit degraded stack recommendation for: {_idea_label(idea)}",
                     "Selected project-specific technologies from idea and RAG hints.",
-                    "Did not default to MVPilot host stack.",
+                    "Did not default to GemPilot host stack.",
                 ],
             )
             return RecommendedStackOutput.model_validate(payload).model_dump()
@@ -178,7 +178,7 @@ class IdeaAwarePartialClient:
             if not architecture_plan:
                 plan_payload = _repo_plan_payload(mode, reason, idea, prompt)
             else:
-                plan_payload = RepoPlanOutput.model_validate(
+                plan_payload = ArchitecturePlanOutput.model_validate(
                     {
                         **architecture_plan,
                         "mode": mode,

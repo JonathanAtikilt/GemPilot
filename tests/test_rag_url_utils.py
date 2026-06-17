@@ -7,12 +7,12 @@ def test_collect_source_urls_dedupes_and_normalizes() -> None:
         primary_rules_url="https://Example.com/rules/",
         additional_urls=[
             "https://example.com/rules",
-            "https://docs.nvidia.com/nemotron/",
+            "https://docs.google-ai.com/gemini/",
         ],
     )
 
     assert "https://example.com/rules" in urls
-    assert "https://docs.nvidia.com/nemotron" in urls
+    assert "https://docs.google-ai.com/gemini" in urls
     assert len(urls) == 2
 
 
@@ -34,11 +34,11 @@ def test_run_agent_request_merges_frontend_url_fields() -> None:
             "idea": "Build a planner",
             "repo_visibility": "public",
             "rules_url": "https://hackathon.example.com/rules",
-            "additional_urls": ["https://docs.nvidia.com/models/"],
+            "additional_urls": ["https://docs.google-ai.com/models/"],
         }
     )
 
     assert request.source_urls == [
         "https://hackathon.example.com/rules",
-        "https://docs.nvidia.com/models",
+        "https://docs.google-ai.com/models",
     ]

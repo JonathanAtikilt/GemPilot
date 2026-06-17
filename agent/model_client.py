@@ -16,6 +16,8 @@ from agent.model_outputs import (
     DemoScriptOutput,
     FileManifestOutput,
     FinalReadmeOutput,
+    GeneratedFileBatchOutput,
+    GeneratedFileWithContent,
     MvpScopeOutput,
     PitchOutput,
     RecommendedStackOutput,
@@ -97,7 +99,7 @@ def _parse_json_text(raw: str) -> Any:
 
     if last_error is not None:
         raise last_error
-    raise json.JSONDecodeError("No JSON object found in Nemotron response.", raw, 0)
+    raise json.JSONDecodeError("No JSON object found in model response.", raw, 0)
 
 
 def _json_decode_looks_truncated(exc: BaseException | None) -> bool:
@@ -173,7 +175,7 @@ class DeterministicModelClient:
         )
 
 
-class NemotronModelClient:
+class ProviderModelClient:
     def __init__(
         self,
         settings: Settings,
@@ -183,13 +185,17 @@ class NemotronModelClient:
     def _allows_partial_fallback(self, purpose: str) -> bool:
         if not self._settings.allow_idea_aware_partial:
             return False
-        if purpose == "file_manifest" and self._settings.require_live_file_manifest:
+        if (
+            purpose == "file_manifest"
+            and self._settings.require_live_file_manifest
+            and self._settings.llm_configured
+        ):
             return False
         return True
 
     @staticmethod
     async def _backoff_before_retry(reason: str, attempt: int, *, purpose: str) -> None:
-        if "504" not in reason:
+        if not any(code in reason for code in ("429", "500", "502", "503", "504")):
             return
         cap = 90.0 if purpose == "plan_repo" else 45.0
         await asyncio.sleep(min(cap, 2.0 ** (attempt + 1)))
@@ -204,36 +210,44 @@ class NemotronModelClient:
         max_tokens: int = 1200,
         reasoning_effort: str | None = None,
     ) -> ModelCallResult[OutputT]:
-        if not self._settings.nvidia_configured:
+        del reasoning_effort
+        if not self._settings.llm_configured:
+            if not self._settings.allow_idea_aware_partial:
+                raise ModelClientError(
+                    f"Missing {self._settings.llm_missing_api_key_name} for "
+                    f"LLM_PROVIDER={self._settings.llm_provider}. "
+                    "Live-only mode is enabled; degraded fallback is disabled."
+                )
             return await self._idea_specific_partial(
                 purpose=purpose,
                 model=model,
                 prompt=prompt,
                 response_model=response_model,
-                reason="Missing NVIDIA_API_KEY for live mode.",
+                reason=(
+                    f"Missing {self._settings.llm_missing_api_key_name} for "
+                    f"LLM_PROVIDER={self._settings.llm_provider}."
+                ),
             )
 
         started = perf_counter()
-        attempts = max(0, self._settings.nemotron_max_retries_for(purpose)) + 1
-        last_reason = "Nemotron request failed."
-        effort = reasoning_effort or self._settings.nemotron_reasoning_effort
+        attempts = max(0, self._settings.llm_max_retries_for(purpose)) + 1
+        last_reason = "LLM request failed."
         effective_max_tokens = max(
             max_tokens,
-            self._settings.nemotron_max_tokens_for(purpose),
+            self._settings.llm_max_tokens_for(purpose),
         )
 
         for attempt in range(attempts):
             try:
-                payload = await self._send_completion_request(
+                parsed = await self._send_completion_request(
                     purpose=purpose,
                     model=model,
                     prompt=prompt,
                     response_model=response_model,
                     max_tokens=effective_max_tokens,
-                    reasoning_effort=effort,
                 )
                 return self._parse_completion_payload(
-                    payload=payload,
+                    parsed=parsed,
                     purpose=purpose,
                     model=model,
                     response_model=response_model,
@@ -241,10 +255,7 @@ class NemotronModelClient:
                 )
             except RetryableModelClientError as exc:
                 last_reason = exc.safe_message
-                if (
-                    last_reason == "Nemotron returned truncated JSON."
-                    and effective_max_tokens < 12_000
-                ):
+                if "truncated JSON" in last_reason and effective_max_tokens < 12_000:
                     effective_max_tokens = _bump_max_tokens(effective_max_tokens)
                 if attempt + 1 < attempts:
                     await self._backoff_before_retry(
@@ -253,8 +264,8 @@ class NemotronModelClient:
                     continue
                 if not self._allows_partial_fallback(purpose):
                     raise ModelClientError(
-                        f"Live Nemotron is required for full project generation ({last_reason}). "
-                        "Set NEMOTRON_API_KEY/NVIDIA_API_KEY or enable degraded mode explicitly."
+                        f"Live LLM output is required for full project generation ({last_reason}). "
+                        f"Set {self._settings.llm_missing_api_key_name} or enable degraded mode explicitly."
                     ) from exc
                 return await self._idea_specific_partial(
                     purpose=purpose,
@@ -276,7 +287,7 @@ class NemotronModelClient:
                     started=started,
                 )
             except httpx.TimeoutException as exc:
-                last_reason = "Nemotron request timed out."
+                last_reason = "LLM request timed out."
                 if attempt + 1 < attempts:
                     await self._backoff_before_retry(
                         last_reason, attempt, purpose=purpose
@@ -284,8 +295,8 @@ class NemotronModelClient:
                     continue
                 if not self._allows_partial_fallback(purpose):
                     raise ModelClientError(
-                        f"Live Nemotron is required for full project generation ({last_reason}). "
-                        "Set NEMOTRON_API_KEY/NVIDIA_API_KEY or enable degraded mode explicitly."
+                        f"Live LLM output is required for full project generation ({last_reason}). "
+                        f"Set {self._settings.llm_missing_api_key_name} or enable degraded mode explicitly."
                     ) from exc
                 return await self._idea_specific_partial(
                     purpose=purpose,
@@ -296,7 +307,7 @@ class NemotronModelClient:
                     started=started,
                 )
             except httpx.HTTPError as exc:
-                last_reason = "Nemotron request failed."
+                last_reason = "LLM request failed."
                 if attempt + 1 < attempts:
                     await self._backoff_before_retry(
                         last_reason, attempt, purpose=purpose
@@ -304,8 +315,8 @@ class NemotronModelClient:
                     continue
                 if not self._allows_partial_fallback(purpose):
                     raise ModelClientError(
-                        f"Live Nemotron is required for full project generation ({last_reason}). "
-                        "Set NEMOTRON_API_KEY/NVIDIA_API_KEY or enable degraded mode explicitly."
+                        f"Live LLM output is required for full project generation ({last_reason}). "
+                        f"Set {self._settings.llm_missing_api_key_name} or enable degraded mode explicitly."
                     ) from exc
                 return await self._idea_specific_partial(
                     purpose=purpose,
@@ -318,8 +329,8 @@ class NemotronModelClient:
 
         if not self._allows_partial_fallback(purpose):
             raise ModelClientError(
-                f"Live Nemotron is required for full project generation ({last_reason}). "
-                "Set NEMOTRON_API_KEY/NVIDIA_API_KEY or enable degraded mode explicitly."
+                f"Live LLM output is required for full project generation ({last_reason}). "
+                f"Set {self._settings.llm_missing_api_key_name} or enable degraded mode explicitly."
             )
         return await self._idea_specific_partial(
             purpose=purpose,
@@ -338,136 +349,76 @@ class NemotronModelClient:
         prompt: str,
         response_model: type[OutputT],
         max_tokens: int,
-        reasoning_effort: str,
-    ) -> dict:
-        url = f"{self._settings.nemotron_base_url.rstrip('/')}/chat/completions"
+    ) -> Any:
+        from agent.llm.provider import LLMProviderError, generate_json
+
         if purpose == "file_manifest":
             system_content = (
-                "You are MVPilot's full project repository manifest planner. Return only one "
+                "You are GemPilot's full-stack hackathon project repository manifest planner. Return only one "
                 "complete JSON object matching the guided schema. List every required "
                 "file path with kind and a short summary. Do not include file bodies or "
                 "content fields. No markdown fences, prose, or trailing commas."
             )
         else:
             system_content = (
-                "You are MVPilot's full project planning model. Return only "
+                "You are GemPilot's full-stack hackathon project planning model. Return only "
                 "one complete JSON object that matches the guided schema. "
                 "No markdown fences, prose, or trailing commas. Close all "
                 "strings, arrays, and objects."
             )
-        request_body = {
+        options: dict[str, Any] = {
+            "provider": self._settings.llm_provider,
             "model": model,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt},
-            ],
+            "api_key": self._settings.llm_api_key.get_secret_value()
+            if self._settings.llm_api_key
+            else None,
+            "base_url": self._settings.llm_base_url,
             "temperature": 0.2,
             "top_p": 0.95,
             "max_tokens": max_tokens,
-            "stream": False,
-            "reasoning_effort": reasoning_effort,
-            "guided_json": response_model.model_json_schema(),
+            "timeout_seconds": self._settings.llm_read_timeout_seconds(purpose),
         }
-        headers = {
-            "Authorization": (
-                f"Bearer {self._settings.nvidia_api_key.get_secret_value()}"
-            ),
-            "Content-Type": "application/json",
-        }
-
-        read_timeout = self._settings.nemotron_read_timeout_seconds(purpose)
-        timeout = httpx.Timeout(
-            connect=30.0,
-            read=read_timeout,
-            write=120.0,
-            pool=60.0,
-        )
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, headers=headers, json=request_body)
-            if response.status_code == 202:
-                request_id = self._extract_request_id(response)
-                return await self._poll_status(
-                    client=client,
-                    request_id=request_id,
-                    purpose=purpose,
-                )
-            if response.status_code == 200:
-                return self._safe_response_json(response)
-            if response.status_code == 429 or response.status_code >= 500:
-                raise RetryableModelClientError(
-                    f"HTTP {response.status_code} from Nemotron."
-                )
-            raise ModelClientError(f"HTTP {response.status_code} from Nemotron.")
-
-    async def _poll_status(
-        self,
-        *,
-        client: httpx.AsyncClient,
-        request_id: str,
-        purpose: str,
-    ) -> dict:
-        status_url = (
-            f"{self._settings.nemotron_base_url.rstrip('/')}/status/{request_id}"
-        )
-        deadline = perf_counter() + self._settings.nemotron_poll_max_seconds_for(purpose)
-        max_attempts = max(1, self._settings.nemotron_poll_attempts)
-        interval = self._settings.nemotron_poll_interval_seconds
-
-        for attempt in range(max_attempts):
-            if perf_counter() >= deadline:
-                break
-            if interval > 0 and attempt > 0:
-                await asyncio.sleep(interval)
-
-            response = await client.get(status_url)
-            if response.status_code == 202:
-                continue
-            if response.status_code != 200:
-                raise ModelClientError(
-                    f"HTTP {response.status_code} from Nemotron status."
-                )
-
-            payload = self._safe_response_json(response)
-            status = str(payload.get("status", "")).lower()
-            if status in {"failed", "error", "cancelled"}:
-                raise ModelClientError("Nemotron async request failed.")
-            if status in {"", "fulfilled", "completed", "succeeded", "success"}:
-                try:
-                    self._extract_content(payload)
-                except ModelClientError:
-                    continue
-                return payload
-
-        raise RetryableModelClientError("Nemotron request stayed pending.")
+        if self._settings.allow_idea_aware_partial:
+            options.update(
+                {
+                    "fallback_provider": "groq"
+                    if self._settings.llm_provider != "groq" and self._settings.groq_api_key
+                    else None,
+                    "fallback_model": self._settings.llm_fallback_model_name,
+                    "fallback_api_key": self._settings.groq_api_key.get_secret_value()
+                    if self._settings.groq_api_key
+                    else None,
+                    "fallback_base_url": self._settings.groq_base_url,
+                }
+            )
+        try:
+            return await generate_json(
+                [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": prompt},
+                ],
+                response_model.model_json_schema(),
+                options=options,
+            )
+        except LLMProviderError as exc:
+            if exc.retryable:
+                raise RetryableModelClientError(exc.safe_message) from exc
+            raise ModelClientError(exc.safe_message) from exc
 
     def _parse_completion_payload(
         self,
         *,
-        payload: dict,
+        parsed: Any,
         purpose: str,
         model: str,
         response_model: type[OutputT],
         started: float,
     ) -> ModelCallResult[OutputT]:
-        raw_content = self._extract_content(payload)
-        try:
-            if isinstance(raw_content, str):
-                parsed = _parse_json_text(raw_content)
-            else:
-                parsed = raw_content
-        except json.JSONDecodeError as exc:
-            message = (
-                "Nemotron returned truncated JSON."
-                if _json_decode_looks_truncated(exc)
-                else "Nemotron returned invalid JSON."
-            )
-            raise RetryableModelClientError(message) from exc
-
         try:
             output = response_model.model_validate(parsed)
         except ValidationError as exc:
             raise RetryableModelClientError(
-                "Nemotron response failed schema validation."
+                "LLM response failed schema validation."
             ) from exc
 
         return ModelCallResult(
@@ -490,16 +441,16 @@ class NemotronModelClient:
     ) -> ModelCallResult[OutputT]:
         if not self._settings.allow_idea_aware_partial:
             raise ModelClientError(
-                f"Live Nemotron is required for full project generation ({reason}). "
-                "Set NEMOTRON_API_KEY/NVIDIA_API_KEY or enable degraded mode explicitly."
+                f"Live LLM output is required for full project generation ({reason}). "
+                f"Set {self._settings.llm_missing_api_key_name} or enable degraded mode explicitly."
             )
 
         from agent.idea_aware_partial import IdeaAwarePartialClient
 
         partial_reason = reason
-        if self._settings.nemotron_fast_fallback_active:
+        if self._settings.llm_fast_fallback_active:
             partial_reason = (
-                f"{reason} Using explicit degraded project output after a short live Nemotron attempt."
+                f"{reason} Using explicit degraded project output after a short live LLM attempt."
             )
 
         partial_client = IdeaAwarePartialClient(partial_reason=partial_reason)
@@ -513,53 +464,8 @@ class NemotronModelClient:
             return result
         return replace(result, latency_ms=_elapsed_ms(started))
 
-    @staticmethod
-    def _safe_response_json(response: httpx.Response) -> dict:
-        try:
-            payload = response.json()
-        except json.JSONDecodeError as exc:
-            raise ModelClientError("Nemotron returned invalid JSON.") from exc
-        if not isinstance(payload, dict):
-            raise ModelClientError("Nemotron returned invalid JSON.")
-        return payload
 
-    @staticmethod
-    def _extract_request_id(response: httpx.Response) -> str:
-        payload = NemotronModelClient._safe_response_json(response)
-        request_id = payload.get("requestId")
-        if not isinstance(request_id, str) or not request_id.strip():
-            raise ModelClientError("Nemotron accepted request without requestId.")
-        return request_id
-
-    @staticmethod
-    def _extract_content(payload: dict) -> str | dict | list:
-        choices = payload.get("choices")
-        if isinstance(choices, list) and choices:
-            first_choice = choices[0]
-            if isinstance(first_choice, dict):
-                message = first_choice.get("message")
-                if isinstance(message, dict):
-                    content = message.get("content")
-                    if isinstance(content, str) and content.strip():
-                        return content
-                    for key in ("reasoning_content", "reasoning"):
-                        alternate = message.get(key)
-                        if isinstance(alternate, str) and alternate.strip():
-                            return alternate
-                if "text" in first_choice:
-                    return first_choice["text"]
-
-        for key in ("response", "result", "output"):
-            nested = payload.get(key)
-            if isinstance(nested, dict):
-                return NemotronModelClient._extract_content(nested)
-            if isinstance(nested, (str, list)):
-                return nested
-
-        if "content" in payload:
-            return payload["content"]
-
-        raise ModelClientError("Nemotron response missing completion content.")
+GeminiModelClient = ProviderModelClient
 
 
 def _elapsed_ms(started: float) -> int:
@@ -625,6 +531,14 @@ def _deterministic_payload(
         return _demo_script_payload(mode, fallback_reason, idea, prompt)
     if purpose == "pitch":
         return _pitch_payload(mode, fallback_reason, idea, prompt)
+    if purpose in {
+        "generate_database",
+        "generate_backend",
+        "generate_frontend",
+        "generate_docs",
+        "generate_demo_video",
+    }:
+        return _code_generation_payload(mode, fallback_reason, idea, purpose)
 
     payloads = {
         "scope_mvp": _scope_payload,
@@ -717,7 +631,7 @@ def _stack_recommendation_payload(
         fallback_reason,
         [
             f"Stack Selector Agent grounded stack in: {_idea_label(idea)}.",
-            "Did not copy MVPilot host platform defaults.",
+            "Did not copy GemPilot host platform defaults.",
             "Aligned stack with idea, depth, platform, and RAG hints.",
         ],
     )
@@ -768,6 +682,15 @@ def _repo_plan_payload(
         "docs/BUILD_LOG.md",
         "docs/KNOWN_LIMITATIONS.md",
         "docs/WALKTHROUGH.md",
+        "docs/HACKATHON_SUBMISSION.md",
+        "data/seed.json",
+        "scripts/seed_data.py",
+        "demo/script.md",
+        "demo/storyboard.md",
+        "demo/demo_walkthrough.md",
+        "demo/video_outline.md",
+        "demo/voiceover.md",
+        "demo/demo_script.md",
         ".env.example",
     ]
     plan_payload = RepoPlanOutput(
@@ -852,7 +775,16 @@ def _repo_plan_payload(
         ],
         documentation_plan=[
             "README with setup and usage",
-            "Architecture, API, database, testing, deployment, limitations, and walkthrough docs",
+            "Architecture, API, database, testing, deployment, limitations, walkthrough, demo materials, and hackathon submission docs",
+        ],
+        demo_video_plan=[
+            "Create demo/script.md with timestamps for the generated product user flow.",
+            "Create storyboard, walkthrough, video outline, and optional voiceover files under demo/.",
+            "Link demo materials from the README Demo section.",
+        ],
+        hackathon_submission_plan=[
+            "Summarize problem, solution, stack, differentiators, setup, demo flow, and judging proof.",
+            "Point judges to README, API docs, tests, deployment guide, and demo materials.",
         ],
         mode=mode,
         decision_trace=_trace(
@@ -1038,7 +970,7 @@ def _final_readme_payload(
         title=title,
         content=(
             f"# {title}\n\n"
-            f"MVPilot turned this submitted idea into a complete generated software project: {idea}\n\n"
+            f"GemPilot turned this submitted idea into a complete hackathon-ready full-stack project: {idea}\n\n"
             f"Resolved stack: {resolved_stack}.\n\n"
             "The package includes expanded requirements, architecture, source files, API/data plans, "
             "tests, setup instructions, deployment guidance, validation evidence, and a final project report."
@@ -1073,24 +1005,24 @@ def _demo_script_payload(
     return DemoScriptOutput(
         title=f"Three-minute {title} walkthrough",
         content=(
-            f"Open with the submitted idea: {idea}. "
-            "Show MVPilot retrieving context, expanding requirements, designing architecture, "
-            "generating project files, validating the codebase, committing to GitHub, and ending "
-            "with README, architecture, testing, deployment, and report content."
+            f"Open the generated {title} app and frame the user problem: {idea}. "
+            "Sign in, show the dashboard, complete the primary product workflow, create or upload "
+            "sample data, trigger the backend API flow, review database-backed results, and close "
+            "on README setup, API docs, tests, deployment notes, and the demo materials in /demo."
             f"{warning_note}"
         ),
         beats=[
-            "Enter the project idea.",
-            "Watch the graph trace fill with model-backed decisions.",
-            "Show validation and any explicit degraded-mode integrations.",
-            "Close on the generated repository and project report.",
+            "Open the generated app and sign in with the demo user.",
+            "Walk through the product-specific dashboard and primary workflow.",
+            "Show the backend/API result and sample data that supports the flow.",
+            "Close on setup, tests, deployment instructions, and demo video assets.",
         ],
         decision_trace=_trace(
             mode,
             fallback_reason,
             [
                 f"Built the script around observable {title} dashboard moments.",
-                "Kept validation and delivery evidence visible instead of hiding generation work.",
+                "Focused the demo on the generated app's end-to-end user flow and technical proof.",
             ],
         ),
     ).model_dump()
@@ -1106,20 +1038,20 @@ def _pitch_payload(
     title = _project_title(idea, prompt)
     warning_summary = _source_warning_summary(prompt)
     content = (
-        f"MVPilot helps teams move from idea to complete generated software projects. "
+        f"GemPilot helps teams move from idea to complete hackathon-ready full-stack projects. "
         f"For {title}, {label}, it expands requirements, designs the architecture, "
         "generates a full codebase, validates the output, and produces README, setup, "
-        "testing, deployment, and project-report evidence."
+        "testing, deployment, demo-video assets, and project-report evidence."
     )
     if warning_summary:
         content = f"{content} {warning_summary}"
     return PitchOutput(
         title=title,
-        tagline="A Nemotron-powered project studio that turns ideas into committed full-stack repositories.",
+        tagline="A configurable AI project studio that turns ideas into committed full-stack repositories.",
         content=content,
         proof_points=[
             "Stable FastAPI task contracts for frontend integration.",
-            "Structured Nemotron-style reasoning on model-backed steps.",
+            "Structured provider-backed reasoning on model-backed steps.",
             "Visible validation and recovery before final packaging.",
         ],
         decision_trace=_trace(
@@ -1128,6 +1060,511 @@ def _pitch_payload(
             [
                 f"Focused the {title} pitch on speed, traceability, and recovery.",
                 "Used generated artifacts as the proof instead of broad claims.",
+            ],
+        ),
+    ).model_dump()
+
+
+def _code_generation_payload(
+    mode: ModelMode,
+    fallback_reason: str | None,
+    idea: str,
+    stage: str,
+) -> dict:
+    """Mock payload for the 5 staged code-generation purposes."""
+    from agent.model_outputs import GeneratedFileBatchOutput, GeneratedFileWithContent
+
+    label = _idea_label(idea)
+    stage_short = stage.replace("generate_", "")
+
+    # Minimal but structurally valid file set per stage
+    _stage_files: dict[str, list[dict[str, str]]] = {
+        "database": [
+            {
+                "name": "backend/db.py",
+                "kind": "python",
+                "summary": "SQLAlchemy async engine and session factory.",
+                "content": (
+                    "from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine\n"
+                    "from sqlalchemy.orm import DeclarativeBase, sessionmaker\n"
+                    "import os\n\n"
+                    "DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite+aiosqlite:///./app.db')\n"
+                    "engine = create_async_engine(DATABASE_URL, echo=False)\n"
+                    "AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)\n\n"
+                    "class Base(DeclarativeBase):\n"
+                    "    pass\n\n"
+                    "async def get_db():\n"
+                    "    async with AsyncSessionLocal() as session:\n"
+                    "        yield session\n"
+                ),
+            },
+            {
+                "name": "backend/models.py",
+                "kind": "python",
+                "summary": f"ORM models for {label}.",
+                "content": (
+                    "from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text\n"
+                    "from sqlalchemy.orm import relationship\n"
+                    "from sqlalchemy.sql import func\n"
+                    "from backend.db import Base\n\n"
+                    "class User(Base):\n"
+                    "    __tablename__ = 'users'\n"
+                    "    id = Column(Integer, primary_key=True, index=True)\n"
+                    "    email = Column(String, unique=True, index=True, nullable=False)\n"
+                    "    hashed_password = Column(String, nullable=False)\n"
+                    "    is_active = Column(Boolean, default=True)\n"
+                    "    created_at = Column(DateTime(timezone=True), server_default=func.now())\n\n"
+                    f"    def __repr__(self) -> str:\n"
+                    f"        return f'<User id={{self.id}} email={{self.email}}>'\n"
+                ),
+            },
+            {
+                "name": "docs/DATABASE_SCHEMA.sql",
+                "kind": "sql",
+                "summary": "DDL for all application tables.",
+                "content": (
+                    f"-- {label} database schema\n"
+                    "CREATE TABLE IF NOT EXISTS users (\n"
+                    "    id SERIAL PRIMARY KEY,\n"
+                    "    email VARCHAR(255) UNIQUE NOT NULL,\n"
+                    "    hashed_password VARCHAR(255) NOT NULL,\n"
+                    "    is_active BOOLEAN DEFAULT TRUE,\n"
+                    "    created_at TIMESTAMPTZ DEFAULT NOW()\n"
+                    ");\n"
+                    "CREATE INDEX idx_users_email ON users(email);\n"
+                ),
+            },
+            {
+                "name": "scripts/seed_data.py",
+                "kind": "python",
+                "summary": "Seed sample data for development.",
+                "content": (
+                    "\"\"\"Seed development data.\"\"\"\n"
+                    "import asyncio\n"
+                    "from backend.db import AsyncSessionLocal, engine, Base\n"
+                    "from backend.models import User\n"
+                    "from passlib.context import CryptContext\n\n"
+                    "pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')\n\n"
+                    "async def seed():\n"
+                    "    async with engine.begin() as conn:\n"
+                    "        await conn.run_sync(Base.metadata.create_all)\n"
+                    "    async with AsyncSessionLocal() as db:\n"
+                    "        demo = User(email='demo@example.com', hashed_password=pwd_context.hash('demo1234'))\n"
+                    "        db.add(demo)\n"
+                    "        await db.commit()\n"
+                    "    print('Seed complete.')\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    asyncio.run(seed())\n"
+                ),
+            },
+        ],
+        "backend": [
+            {
+                "name": "backend/main.py",
+                "kind": "python",
+                "summary": f"FastAPI application for {label}.",
+                "content": (
+                    "from fastapi import FastAPI\n"
+                    "from fastapi.middleware.cors import CORSMiddleware\n"
+                    "from backend.routers import auth, items\n\n"
+                    f"app = FastAPI(title='{label}', version='1.0.0')\n"
+                    "app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'], allow_credentials=True)\n"
+                    "app.include_router(auth.router, prefix='/api/auth', tags=['auth'])\n"
+                    "app.include_router(items.router, prefix='/api/items', tags=['items'])\n\n"
+                    "@app.get('/health')\n"
+                    "def health(): return {'status': 'ok'}\n"
+                ),
+            },
+            {
+                "name": "backend/auth.py",
+                "kind": "python",
+                "summary": "JWT authentication helpers.",
+                "content": (
+                    "from datetime import datetime, timedelta\n"
+                    "from jose import JWTError, jwt\n"
+                    "from passlib.context import CryptContext\n"
+                    "from fastapi import Depends, HTTPException, status\n"
+                    "from fastapi.security import OAuth2PasswordBearer\n"
+                    "import os\n\n"
+                    "SECRET_KEY = os.getenv('SECRET_KEY', 'change-me-in-production')\n"
+                    "ALGORITHM = 'HS256'\n"
+                    "ACCESS_TOKEN_EXPIRE_MINUTES = 60\n"
+                    "pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')\n"
+                    "oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/api/auth/token')\n\n"
+                    "def create_access_token(data: dict) -> str:\n"
+                    "    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)\n"
+                    "    return jwt.encode({**data, 'exp': expire}, SECRET_KEY, algorithm=ALGORITHM)\n\n"
+                    "def verify_password(plain: str, hashed: str) -> bool:\n"
+                    "    return pwd_context.verify(plain, hashed)\n\n"
+                    "def hash_password(plain: str) -> str:\n"
+                    "    return pwd_context.hash(plain)\n"
+                ),
+            },
+            {
+                "name": ".env.example",
+                "kind": "text",
+                "summary": "Environment variable template.",
+                "content": (
+                    "# Application\n"
+                    f"APP_NAME={label}\n"
+                    "SECRET_KEY=your-secret-key-here\n"
+                    "DATABASE_URL=sqlite+aiosqlite:///./app.db\n"
+                    "# DATABASE_URL=postgresql+asyncpg://user:pass@localhost/dbname\n\n"
+                    "# Frontend\n"
+                    "VITE_API_URL=http://localhost:8000\n"
+                ),
+            },
+            {
+                "name": "requirements.txt",
+                "kind": "text",
+                "summary": "Python dependencies.",
+                "content": (
+                    "fastapi>=0.110.0\n"
+                    "uvicorn[standard]>=0.27.0\n"
+                    "sqlalchemy>=2.0.0\n"
+                    "aiosqlite>=0.20.0\n"
+                    "alembic>=1.13.0\n"
+                    "python-jose[cryptography]>=3.3.0\n"
+                    "passlib[bcrypt]>=1.7.4\n"
+                    "python-multipart>=0.0.9\n"
+                    "pydantic>=2.6.0\n"
+                    "pydantic-settings>=2.2.0\n"
+                    "httpx>=0.27.0\n"
+                    "pytest>=8.0.0\n"
+                    "pytest-asyncio>=0.23.0\n"
+                ),
+            },
+            {
+                "name": "tests/test_api.py",
+                "kind": "python",
+                "summary": "API smoke tests.",
+                "content": (
+                    "import pytest\n"
+                    "from httpx import AsyncClient, ASGITransport\n"
+                    "from backend.main import app\n\n"
+                    "@pytest.mark.asyncio\n"
+                    "async def test_health():\n"
+                    "    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:\n"
+                    "        resp = await client.get('/health')\n"
+                    "    assert resp.status_code == 200\n"
+                    "    assert resp.json()['status'] == 'ok'\n"
+                ),
+            },
+        ],
+        "frontend": [
+            {
+                "name": "index.html",
+                "kind": "html",
+                "summary": "HTML shell.",
+                "content": (
+                    "<!DOCTYPE html>\n<html lang='en'>\n<head>\n"
+                    "  <meta charset='UTF-8'/>\n"
+                    "  <meta name='viewport' content='width=device-width, initial-scale=1.0'/>\n"
+                    f"  <title>{label}</title>\n"
+                    "</head>\n<body>\n"
+                    "  <div id='root'></div>\n"
+                    "  <script type='module' src='/src/main.jsx'></script>\n"
+                    "</body>\n</html>\n"
+                ),
+            },
+            {
+                "name": "package.json",
+                "kind": "json",
+                "summary": "Frontend dependencies.",
+                "content": (
+                    "{\n"
+                    f'  "name": "{label.lower().replace(" ", "-")}",\n'
+                    '  "version": "0.1.0",\n'
+                    '  "private": true,\n'
+                    '  "scripts": {\n'
+                    '    "dev": "vite",\n'
+                    '    "build": "vite build",\n'
+                    '    "preview": "vite preview"\n'
+                    "  },\n"
+                    '  "dependencies": {\n'
+                    '    "react": "^18.2.0",\n'
+                    '    "react-dom": "^18.2.0",\n'
+                    '    "react-router-dom": "^6.22.0",\n'
+                    '    "axios": "^1.6.0"\n'
+                    "  },\n"
+                    '  "devDependencies": {\n'
+                    '    "@vitejs/plugin-react": "^4.2.0",\n'
+                    '    "vite": "^5.1.0",\n'
+                    '    "tailwindcss": "^3.4.0"\n'
+                    "  }\n"
+                    "}\n"
+                ),
+            },
+            {
+                "name": "src/main.jsx",
+                "kind": "javascript",
+                "summary": "React entry point.",
+                "content": (
+                    "import React from 'react';\n"
+                    "import ReactDOM from 'react-dom/client';\n"
+                    "import { BrowserRouter } from 'react-router-dom';\n"
+                    "import App from './App';\n"
+                    "import './styles/globals.css';\n\n"
+                    "ReactDOM.createRoot(document.getElementById('root')).render(\n"
+                    "  <React.StrictMode>\n"
+                    "    <BrowserRouter><App /></BrowserRouter>\n"
+                    "  </React.StrictMode>\n"
+                    ");\n"
+                ),
+            },
+            {
+                "name": "src/App.jsx",
+                "kind": "javascript",
+                "summary": "Route definitions.",
+                "content": (
+                    "import { Routes, Route, Navigate } from 'react-router-dom';\n"
+                    "import LandingPage from './pages/LandingPage';\n"
+                    "import LoginPage from './pages/LoginPage';\n"
+                    "import Dashboard from './pages/Dashboard';\n\n"
+                    "export default function App() {\n"
+                    "  return (\n"
+                    "    <Routes>\n"
+                    "      <Route path='/' element={<LandingPage />} />\n"
+                    "      <Route path='/login' element={<LoginPage />} />\n"
+                    "      <Route path='/dashboard' element={<Dashboard />} />\n"
+                    "      <Route path='*' element={<Navigate to='/' />} />\n"
+                    "    </Routes>\n"
+                    "  );\n"
+                    "}\n"
+                ),
+            },
+            {
+                "name": "src/lib/api.js",
+                "kind": "javascript",
+                "summary": "Axios API client.",
+                "content": (
+                    "import axios from 'axios';\n\n"
+                    "const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000' });\n\n"
+                    "api.interceptors.request.use(cfg => {\n"
+                    "  const token = localStorage.getItem('token');\n"
+                    "  if (token) cfg.headers.Authorization = `Bearer ${token}`;\n"
+                    "  return cfg;\n"
+                    "});\n\n"
+                    "export const auth = {\n"
+                    "  login: (email, password) => api.post('/api/auth/token', { email, password }),\n"
+                    "  register: (email, password) => api.post('/api/auth/register', { email, password }),\n"
+                    "};\n\n"
+                    "export default api;\n"
+                ),
+            },
+            {
+                "name": "src/pages/Dashboard.jsx",
+                "kind": "javascript",
+                "summary": f"Main dashboard for {label}.",
+                "content": (
+                    "import React, { useEffect, useState } from 'react';\n"
+                    "import api from '../lib/api';\n\n"
+                    "export default function Dashboard() {\n"
+                    "  const [data, setData] = useState(null);\n"
+                    "  const [loading, setLoading] = useState(true);\n"
+                    "  const [error, setError] = useState(null);\n\n"
+                    "  useEffect(() => {\n"
+                    "    api.get('/api/items')\n"
+                    "      .then(r => setData(r.data))\n"
+                    "      .catch(e => setError(e.message))\n"
+                    "      .finally(() => setLoading(false));\n"
+                    "  }, []);\n\n"
+                    "  if (loading) return <div className='p-8 text-center'>Loading...</div>;\n"
+                    "  if (error) return <div className='p-8 text-red-500'>{error}</div>;\n\n"
+                    "  return (\n"
+                    "    <div className='p-8'>\n"
+                    f"      <h1 className='text-2xl font-bold mb-4'>{label} Dashboard</h1>\n"
+                    "      <pre className='bg-gray-100 rounded p-4 text-sm overflow-auto'>{JSON.stringify(data, null, 2)}</pre>\n"
+                    "    </div>\n"
+                    "  );\n"
+                    "}\n"
+                ),
+            },
+        ],
+        "docs": [
+            {
+                "name": "README.md",
+                "kind": "markdown",
+                "summary": f"README for {label}.",
+                "content": (
+                    f"# {label}\n\n"
+                    f"> {idea[:120]}\n\n"
+                    "## Quick Start\n\n"
+                    "```bash\n"
+                    "# Backend\n"
+                    "cd backend && pip install -r requirements.txt\n"
+                    "cp .env.example .env   # fill in your values\n"
+                    "uvicorn backend.main:app --reload --port 8000\n\n"
+                    "# Frontend\n"
+                    "npm install && npm run dev\n"
+                    "```\n\n"
+                    "## Tech Stack\n\n"
+                    "| Layer | Technology |\n"
+                    "|-------|------------|\n"
+                    "| Frontend | React + Vite + Tailwind CSS |\n"
+                    "| Backend | FastAPI + SQLAlchemy |\n"
+                    "| Database | SQLite (dev) / PostgreSQL (prod) |\n"
+                    "| Auth | JWT (python-jose + bcrypt) |\n\n"
+                    "## Environment Variables\n\n"
+                    "See `.env.example` for all required variables.\n"
+                ),
+            },
+            {
+                "name": "docs/ARCHITECTURE.md",
+                "kind": "markdown",
+                "summary": "Architecture overview.",
+                "content": (
+                    f"# {label} — Architecture\n\n"
+                    "```\n"
+                    "Browser → React (Vite) → Axios → FastAPI → SQLAlchemy → SQLite/PostgreSQL\n"
+                    "```\n\n"
+                    "## Frontend\n\n"
+                    "- **Frontend** (`src/`): React SPA with React Router, Tailwind CSS, Axios\n\n"
+                    "## Backend\n\n"
+                    "- **Backend** (`backend/`): FastAPI with async SQLAlchemy and JWT auth\n\n"
+                    "## Data\n\n"
+                    "- **Database** (`docs/DATABASE_SCHEMA.sql`): relational schema and seed data\n\n"
+                    "## Auth\n\n"
+                    "- JWT login/register routes with backend-only secret handling\n"
+                ),
+            },
+            {
+                "name": "docs/API_SPEC.md",
+                "kind": "markdown",
+                "summary": "API endpoint reference.",
+                "content": (
+                    f"# {label} — API Reference\n\n"
+                    "## Auth\n\n"
+                    "### `POST /api/auth/register`\n"
+                    "Register a new user.\n\n"
+                    "**Body:** `{ email, password }`  \n"
+                    "**Response:** `{ access_token, token_type }`\n\n"
+                    "### `POST /api/auth/token`\n"
+                    "Login and receive a JWT.\n\n"
+                    "**Body:** `{ email, password }`  \n"
+                    "**Response:** `{ access_token, token_type }`\n\n"
+                    "## Items\n\n"
+                    "### `GET /api/items`\n"
+                    "List all items. Requires auth.\n\n"
+                    "### `POST /api/items`\n"
+                    "Create an item. Requires auth.\n\n"
+                    "### `GET /api/items/{id}`\n"
+                    "Get item by ID.\n\n"
+                    "### `PUT /api/items/{id}`\n"
+                    "Update item.\n\n"
+                    "### `DELETE /api/items/{id}`\n"
+                    "Delete item.\n"
+                ),
+            },
+            {
+                "name": "docs/DEPLOY.md",
+                "kind": "markdown",
+                "summary": "Deployment guide.",
+                "content": (
+                    f"# {label} — Deployment\n\n"
+                    "## Frontend → Vercel\n\n"
+                    "1. Connect GitHub repo to Vercel\n"
+                    "2. Set `VITE_API_URL` to your backend URL\n"
+                    "3. Deploy\n\n"
+                    "## Backend → Railway / Render\n\n"
+                    "1. Set `DATABASE_URL` to your Postgres connection string\n"
+                    "2. Set `SECRET_KEY` to a secure random value\n"
+                    "3. Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`\n"
+                ),
+            },
+        ],
+        "demo_video": [
+            {
+                "name": "demo/script.md",
+                "kind": "markdown",
+                "summary": f"Timestamped recording script for {label}.",
+                "content": (
+                    f"# {label} Demo Script\n\n"
+                    "## 0:00 - Hook\n\n"
+                    f"Introduce the user problem behind {idea}.\n\n"
+                    "## 0:25 - Product Flow\n\n"
+                    "Sign in with the demo account, open the dashboard, create sample data, and complete the core workflow.\n\n"
+                    "## 1:30 - Technical Proof\n\n"
+                    "Show the frontend route, backend API response, database schema, tests, and deployment guide.\n\n"
+                    "## 2:30 - Close\n\n"
+                    "Summarize the hackathon-ready value and point judges to README.md and docs/HACKATHON_SUBMISSION.md.\n"
+                ),
+            },
+            {
+                "name": "demo/storyboard.md",
+                "kind": "markdown",
+                "summary": f"Storyboard for the {label} demo recording.",
+                "content": (
+                    f"# {label} Storyboard\n\n"
+                    "| Time | Shot | Proof |\n"
+                    "| --- | --- | --- |\n"
+                    "| 0:00 | App landing/dashboard | Clear project identity and problem |\n"
+                    "| 0:25 | Authenticated workspace | Login and role-aware UI |\n"
+                    "| 0:55 | Core workflow | User creates or uploads sample data |\n"
+                    "| 1:30 | API/docs/tests | Backend, schema, tests, and deployment proof |\n"
+                ),
+            },
+            {
+                "name": "demo/demo_walkthrough.md",
+                "kind": "markdown",
+                "summary": f"Click-by-click walkthrough for {label}.",
+                "content": (
+                    f"# {label} Demo Walkthrough\n\n"
+                    "1. Install dependencies and copy `.env.example`.\n"
+                    "2. Start the backend with `uvicorn backend.main:app --reload`.\n"
+                    "3. Start the frontend with `npm run dev`.\n"
+                    "4. Sign in, run the core workflow, and show generated/sample data in the dashboard.\n"
+                    "5. Open docs/API_SPEC.md, docs/DATABASE_SCHEMA.sql, and tests to show technical completeness.\n"
+                ),
+            },
+            {
+                "name": "demo/video_outline.md",
+                "kind": "markdown",
+                "summary": f"Video outline for {label}.",
+                "content": (
+                    f"# {label} Video Outline\n\n"
+                    "- Opening hook: the user pain and why this project matters.\n"
+                    "- Product proof: dashboard, workflow, sample data, and result state.\n"
+                    "- Technical proof: frontend, backend routes, database schema, tests, env, deployment.\n"
+                    "- Submission close: what is demo-ready today and what comes next.\n"
+                ),
+            },
+            {
+                "name": "demo/voiceover.md",
+                "kind": "markdown",
+                "summary": f"Optional voiceover for {label}.",
+                "content": (
+                    f"# {label} Voiceover\n\n"
+                    f"Today we are showing {label}, a complete full-stack hackathon project for: {idea}. "
+                    "The demo starts with a signed-in user, moves through the real product workflow, "
+                    "and ends with API, database, test, and deployment proof inside the generated repository.\n"
+                ),
+            },
+        ],
+    }
+
+    stage_key = stage.replace("generate_", "")
+    files_data = _stage_files.get(stage_key, [])
+    files = [
+        GeneratedFileWithContent(
+            name=f["name"],
+            kind=f["kind"],
+            summary=f["summary"],
+            content=f["content"],
+        )
+        for f in files_data
+    ]
+
+    return GeneratedFileBatchOutput(
+        stage=stage_key,
+        files=files,
+        mode=mode,
+        decision_trace=_trace(
+            mode,
+            fallback_reason,
+            [
+                f"Mock {stage_key} stage: generated {len(files)} scaffold file(s) for {label}.",
+                "Live LLM call will replace these with product-specific implementations.",
             ],
         ),
     ).model_dump()

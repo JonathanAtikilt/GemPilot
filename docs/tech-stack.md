@@ -1,8 +1,8 @@
-# Tech Stack for the NVIDIA OpenClaw + Nemotron Hackathon
+# Tech Stack for the Google AI LangGraph + Gemini Hackathon
 
 ## Purpose
 
-This file defines the recommended technical stack for a 4-person team building a deployed autonomous enterprise agent for the NVIDIA OpenClaw + Nemotron hackathon.
+This file defines the recommended technical stack for a 4-person team building a deployed autonomous enterprise agent for the Google AI LangGraph + Gemini hackathon.
 
 The architecture should follow this loop:
 
@@ -10,7 +10,7 @@ The architecture should follow this loop:
 Observe -> Retrieve -> Reason -> Act -> Verify -> Remember -> Report
 ```
 
-The project should not be just a chatbot. The goal is a deployed agent that receives an enterprise event, retrieves context, checks memory, reasons with Nemotron, uses live tools, takes an approved action, verifies the result, stores memory, and shows an audit trail.
+The project should not be just a chatbot. The goal is a deployed agent that receives an enterprise event, retrieves context, checks memory, reasons with Gemini, uses live tools, takes an approved action, verifies the result, stores memory, and shows an audit trail.
 
 ---
 
@@ -24,7 +24,7 @@ Frontend:
   Streamlit as the faster fallback
 
 Agent backend:
-  Python + FastAPI + OpenClaw + NVIDIA Nemotron
+  Python + FastAPI + LangGraph + Google AI Gemini
 
 Database / memory / audit:
   Supabase Postgres
@@ -68,7 +68,7 @@ Use Supabase for:
 
 Do not use Supabase as the main agent runtime.
 
-The main autonomous agent should run in Python with OpenClaw and Nemotron. Supabase should be the shared backend and source of truth.
+The main autonomous agent should run in Python with LangGraph and Gemini. Supabase should be the shared backend and source of truth.
 
 ---
 
@@ -84,9 +84,9 @@ Next.js or Streamlit UI
 FastAPI Agent Backend
    |
    v
-OpenClaw Agent Controller
+LangGraph Agent Controller
    |
-   +--> NVIDIA Nemotron reasoning
+   +--> Google AI Gemini reasoning
    |
    +--> Supabase RAG retrieval
    |
@@ -116,8 +116,8 @@ Realtime dashboard update
 |---|---|---|---|
 | Python | Person 1 | Person 1, Person 2, Person 3 | Main agent runtime, ingestion scripts, tool wrappers, verification logic |
 | FastAPI | Person 1 | Person 1, Person 4 | Agent API endpoints that the frontend calls |
-| OpenClaw SDK | Person 1 | Person 1, Person 3 | Agent framework, planner, tool registration, workflow execution |
-| NVIDIA Nemotron | Person 1 | Person 1, optionally Person 2 | Planning, reasoning, tool selection, summarization, final reports |
+| LangGraph SDK | Person 1 | Person 1, Person 3 | Agent framework, planner, tool registration, workflow execution |
+| Google AI Gemini | Person 1 | Person 1, optionally Person 2 | Planning, reasoning, tool selection, summarization, final reports |
 | Custom state machine or LangGraph-style flow | Person 1 | Person 1 | Controls Observe -> Retrieve -> Reason -> Act -> Verify -> Remember -> Report |
 | Pydantic | Person 1 | Person 1, Person 2, Person 3 | Shared schemas for tasks, tool calls, approvals, memory records, reports |
 | Supabase Postgres | Person 2 | Everyone | Shared database for tasks, memory, docs, tools, approvals, audit logs |
@@ -148,7 +148,7 @@ Realtime dashboard update
 
 # 4. Person-by-Person Stack
 
-# Person 1 - Agent Orchestration + Nemotron Logic
+# Person 1 - Agent Orchestration + Gemini Logic
 
 ## Main responsibility
 
@@ -161,8 +161,8 @@ They make sure the system behaves like an autonomous workflow instead of a manua
 ```text
 Python
 FastAPI
-OpenClaw SDK
-NVIDIA Nemotron
+LangGraph SDK
+Google AI Gemini
 Pydantic
 Supabase Python client
 Custom state machine or LangGraph-style flow
@@ -199,11 +199,11 @@ GET /agent/tasks/{task_id}
 GET /health
 ```
 
-### OpenClaw SDK
+### LangGraph SDK
 
 Used as the main agent framework.
 
-OpenClaw should coordinate:
+LangGraph should coordinate:
 
 ```text
 - Planner
@@ -215,7 +215,7 @@ OpenClaw should coordinate:
 - Audit logging
 ```
 
-### NVIDIA Nemotron
+### Google AI Gemini
 
 Used for:
 
@@ -276,8 +276,8 @@ They should define contracts and wire the workflow together.
 ## Person 1 deliverables
 
 ```text
-- Working OpenClaw agent loop
-- Nemotron prompts
+- Working LangGraph agent loop
+- Gemini prompts
 - Tool routing logic
 - Approval orchestration
 - Retry/fallback logic
@@ -356,7 +356,7 @@ Used to convert text into vectors.
 Use one embedding provider consistently. Good options:
 
 ```text
-- NVIDIA embedding model through NIM, if available
+- Google AI embedding model through NIM, if available
 - sentence-transformers fallback for speed
 - Any hackathon-provided embedding endpoint
 ```
@@ -534,7 +534,7 @@ This person should build fewer integrations but make them reliable.
 
 ```text
 Python
-OpenClaw tool wrappers
+LangGraph tool wrappers
 Pydantic schemas
 httpx or requests
 Slack API
@@ -939,13 +939,13 @@ repo/
 Use a `.env.example` file with placeholders only.
 
 ```bash
-# NVIDIA / Nemotron
-NVIDIA_API_KEY=
-NEMOTRON_MODEL=
+# Google AI / Gemini
+GEMINI_API_KEY=
+LLM_MODEL=
 
-# OpenClaw
-OPENCLAW_API_KEY=
-OPENCLAW_ENV=
+# LangGraph
+LANGGRAPH_RUNTIME=
+WORKFLOW_RUNTIME_ENV=
 
 # Supabase
 SUPABASE_URL=
@@ -994,11 +994,11 @@ Build one polished path first.
 1. Judge opens dashboard.
 2. Judge clicks "Start incident demo".
 3. Frontend calls POST /agent/run.
-4. Person 1's OpenClaw agent starts task.
+4. Person 1's LangGraph agent starts task.
 5. Agent asks Person 2's retriever for runbooks.
 6. Agent asks Person 2's memory store for similar incidents.
 7. Agent asks Person 3's log tool for current evidence.
-8. Agent reasons with Nemotron.
+8. Agent reasons with Gemini.
 9. Agent proposes a Slack/ticket update.
 10. Approval row is created in Supabase.
 11. Person 4's UI shows approval button via Realtime.
@@ -1133,7 +1133,7 @@ From Person 3:
 
 ```text
 Person 1:
-  Agent loop, FastAPI skeleton, Nemotron prompts
+  Agent loop, FastAPI skeleton, Gemini prompts
 
 Person 2:
   Supabase schema, seed docs, vector retrieval, memory writeback
@@ -1233,8 +1233,8 @@ Do not do this:
 
 ```text
 Person 1:
-  Owns the OpenClaw + Nemotron agent brain.
-  Uses Python, FastAPI, OpenClaw, Nemotron, Pydantic, Supabase client.
+  Owns the LangGraph + Gemini agent brain.
+  Uses Python, FastAPI, LangGraph, Gemini, Pydantic, Supabase client.
 
 Person 2:
   Owns RAG, memory, Supabase schema, vector search, and audit persistence.
@@ -1254,8 +1254,8 @@ The cleanest stack is:
 ```text
 Supabase = shared state, memory, RAG, approvals, audit, realtime UI
 FastAPI = agent API
-OpenClaw = agent framework
-Nemotron = reasoning model
+LangGraph = agent framework
+Gemini = reasoning model
 Python = orchestration and tools
 Next.js or Streamlit = dashboard
 Slack/GitHub/Jira/log API = live action layer

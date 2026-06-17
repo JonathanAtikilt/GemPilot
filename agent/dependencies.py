@@ -6,11 +6,7 @@ from dotenv import load_dotenv
 from fastapi import Request
 
 from agent.config import Settings
-from agent.github_oauth import (
-    GitHubConnectionService,
-    InMemoryGitHubConnectionStore,
-    SupabaseGitHubConnectionStore,
-)
+from agent.github_oauth import GitHubConnectionService, build_github_connection_store
 from agent.service import AgentService
 from agent.project_session_store import SupabasePersistingTaskStore, build_task_store
 from agent.task_store import InMemoryTaskStore
@@ -27,14 +23,11 @@ def reload_runtime_settings(request: Request) -> Settings:
     build_settings.cache_clear()
     load_dotenv(override=True)
     fresh_settings = Settings()
-    store: InMemoryGitHubConnectionStore | SupabaseGitHubConnectionStore
-    if fresh_settings.adapter_mode == "live" and fresh_settings.supabase_configured:
-        store = SupabaseGitHubConnectionStore(fresh_settings)
-    else:
-        store = InMemoryGitHubConnectionStore()
+    store, store_mode = build_github_connection_store(fresh_settings)
     github_service = GitHubConnectionService(settings=fresh_settings, store=store)
     request.app.state.settings = fresh_settings
     request.app.state.github_connection_store = store
+    request.app.state.github_connection_store_mode = store_mode
     request.app.state.github_connection_service = github_service
     request.app.state.task_store = build_task_store(fresh_settings)
     request.app.state.agent_service = AgentService(

@@ -1,20 +1,29 @@
-# MVPilot Build Requirements
+# GemPilot Build Requirements
 
 Authoritative build constraints for the Orchestrator, GitHub Agent, and demo workflow.
 
 # Required Deliverables
 
-- Working MVP that demonstrates the core agent workflow end to end
+- Complete hackathon-ready full-stack project that demonstrates the submitted product workflow end to end
 - GitHub repository with visible commit history
 - README.md with problem statement, setup, and run instructions
+- Frontend app with polished project-specific UI
+- Backend API with real product routes
+- Database schema/models with seed/sample data
+- Authentication when relevant to the product
+- Tests for generated backend/API behavior
+- API docs and deployment instructions
+- `.env.example` with safe placeholders only
 - Setup instructions that a judge can follow locally
 - Agent activity/build log showing orchestration and tool use
 - Demo-ready workflow the frontend can display live
-- Clear NVIDIA/Nemotron usage explanation in README or docs
+- Repository demo materials: `demo/script.md`, `demo/storyboard.md`, `demo/demo_walkthrough.md`, `demo/video_outline.md`, and optional `demo/voiceover.md`
+- Hackathon submission summary in `docs/HACKATHON_SUBMISSION.md`
+- Clear Google AI/Gemini usage explanation in README or docs
 
 # Allowed Tools and APIs
 
-- NVIDIA API for Nemotron reasoning, embeddings, and reranking
+- Google AI API for Gemini reasoning, embeddings, and reranking
 - GitHub API for repo, branch, commit, and PR actions
 - Supabase for Postgres, pgvector, logs, and project state
 - FastAPI for backend endpoints
@@ -28,6 +37,12 @@ Authoritative build constraints for the Orchestrator, GitHub Agent, and demo wor
 - .env.example with documented variables and no real secrets
 - docs/BUILD_LOG.md for agent/build narrative
 - docs/ARCHITECTURE.md describing agents and data flow
+- docs/API_SPEC.md documenting backend routes
+- docs/DATABASE_SCHEMA.sql or equivalent database/schema document
+- docs/DEPLOY.md with deployment instructions
+- docs/HACKATHON_SUBMISSION.md with judging summary
+- demo folder with project-specific video materials
+- data/seed.json or seed script for sample data
 - frontend or apps/web folder for UI code
 - backend or apps/api folder for API code
 - rag/sources folder for indexed knowledge
@@ -45,7 +60,8 @@ Authoritative build constraints for the Orchestrator, GitHub Agent, and demo wor
 - GitHub Agent writes files and commits incremental changes
 - Frontend shows live agent progress and log updates
 - Final repo or PR link is displayed to the user
-- Demo clearly explains NVIDIA/Nemotron usage in the workflow
+- Final repo includes demo video materials specific to the generated project
+- Demo clearly explains Google AI/Gemini usage in the workflow
 
 # Required Tech Stack Pieces
 
@@ -53,15 +69,15 @@ Authoritative build constraints for the Orchestrator, GitHub Agent, and demo wor
 - Backend API: FastAPI
 - Database: Supabase Postgres
 - Vector search: Supabase pgvector
-- Embeddings: NVIDIA llama-nemotron-embed-1b-v2
-- Reranking: NVIDIA llama-nemotron-rerank-1b-v2
-- Orchestrator reasoning: Nemotron reasoning model
+- Embeddings: Google AI gemini-embedding-001
+- Reranking: Google AI cosine similarity ranking
+- Orchestrator reasoning: Gemini reasoning model
 - GitHub integration: GitHub API or Octokit
 - Secrets: backend-only environment variables
 
 # Security Constraints
 
-- Frontend must never send or store GitHub, NVIDIA, or Supabase service-role tokens
+- Frontend must never send or store GitHub, Google AI, or Supabase service-role tokens
 - GitHub OAuth callback must exchange the code server-side
 - Supabase service-role key is backend-only and must not be referenced in Next.js client code
 - Generated repositories may include `.env.example` placeholders but must never commit `.env`
@@ -77,8 +93,8 @@ Authoritative build constraints for the Orchestrator, GitHub Agent, and demo wor
 
 # Scope Warnings
 
-- Do not add recursive web crawling for MVP
+- Do not add recursive web crawling before complete project generation works
 - Do not let the RAG Agent directly commit files to GitHub
 - Do not expose SUPABASE_SERVICE_ROLE_KEY to the frontend
-- Do not build full deployment automation before repo generation works
+- Do not build full deployment automation before complete repo generation works
 - Do not treat raw logs as higher authority than hackathon rules or official model docs

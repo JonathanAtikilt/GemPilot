@@ -100,9 +100,13 @@ ARCHETYPE_API_ROUTES: dict[str, list[str]] = {
     "planner": [
         "POST /api/auth/login",
         "POST /api/uploads",
+        "POST /api/files/upload",
+        "GET /api/study-plan",
+        "POST /api/study-plan",
         "POST /api/summaries",
         "POST /api/quizzes",
         "GET /api/flashcards/review",
+        "GET /api/progress",
         "GET /api/dashboard",
     ],
     "marketplace": [
@@ -240,19 +244,25 @@ def default_user_flows(
                 "step": "1",
                 "screen": "Study Workspace",
                 "action": "Sign in and upload lecture notes for parsing",
-                "api": "POST /api/uploads",
+                "api": "POST /api/files/upload",
             },
             {
                 "step": "2",
+                "screen": "Study Planner",
+                "action": "Generate a weekly plan from deadlines, weak topics, and uploaded notes",
+                "api": "POST /api/study-plan",
+            },
+            {
+                "step": "3",
                 "screen": "AI Review Studio",
                 "action": "Generate summaries, quizzes, and flashcards from the notes",
                 "api": "POST /api/quizzes",
             },
             {
-                "step": "3",
+                "step": "4",
                 "screen": "Exam Prep Dashboard",
-                "action": "Review spaced repetition tasks and personalized exam readiness",
-                "api": "GET /api/dashboard",
+                "action": "Review spaced repetition tasks, progress tracking, and personalized exam readiness",
+                "api": "GET /api/progress",
             },
         ]
 

@@ -33,9 +33,9 @@ BUILD_CONTEXT_DOC_TYPES: list[DocType] = [
     "agent_boundaries",
     "scope_warning",
     "hackathon_rules",
-    "nvidia_docs",
-    "nvidia_model_docs",
-    "nvidia_model_usage",
+    "ai_provider_docs",
+    "llm_model_docs",
+    "llm_model_usage",
     "agent_architecture",
     "implementation_constraints",
     "generated_project_doc",
@@ -50,9 +50,9 @@ DOC_TYPE_TO_CATEGORY: dict[DocType, BuildContextResponseCategory] = {
     "security_constraints": "scopeWarnings",
     "agent_boundaries": "scopeWarnings",
     "hackathon_rules": "requiredDeliverables",
-    "nvidia_docs": "requiredTechStackPieces",
-    "nvidia_model_docs": "requiredTechStackPieces",
-    "nvidia_model_usage": "requiredTechStackPieces",
+    "ai_provider_docs": "requiredTechStackPieces",
+    "llm_model_docs": "requiredTechStackPieces",
+    "llm_model_usage": "requiredTechStackPieces",
     "agent_architecture": "requiredTechStackPieces",
     "implementation_constraints": "scopeWarnings",
     "generated_project_doc": "requiredRepositoryFormat",
@@ -79,7 +79,7 @@ DEFAULT_TECH_STACK_ITEMS: tuple[str, ...] = (
     "Uvicorn",
     "Supabase Postgres",
     "pgvector",
-    "NVIDIA Nemotron",
+    "Google Gemini or Groq/OpenAI-compatible LLM",
     "pytest",
     "npm run build",
 )
@@ -94,7 +94,7 @@ _DEFAULT_STACK_CATEGORIES: dict[str, str] = {
     "Uvicorn": "backend_server",
     "Supabase Postgres": "database",
     "pgvector": "vector_store",
-    "NVIDIA Nemotron": "ai_model",
+    "Google Gemini or Groq/OpenAI-compatible LLM": "ai_model",
     "pytest": "python_tests",
     "npm run build": "js_build",
 }
@@ -109,41 +109,45 @@ _DEFAULT_STACK_ALIASES: dict[str, tuple[str, ...]] = {
     "Uvicorn": ("uvicorn",),
     "Supabase Postgres": ("supabase", "postgres", "postgresql"),
     "pgvector": ("pgvector",),
-    "NVIDIA Nemotron": ("nemotron", "nvidia"),
+    "Google Gemini or Groq/OpenAI-compatible LLM": ("gemini", "groq", "openai", "llm"),
     "pytest": ("pytest",),
     "npm run build": ("npm run build", "npm build"),
 }
 
 FALLBACK_BUILD_ITEMS: dict[BuildContextResponseCategory, tuple[str, ...]] = {
     "requiredDeliverables": (
-        "Working MVP that demonstrates the submitted idea end to end",
-        "README.md with setup, architecture, and NVIDIA/Nemotron usage notes",
+        "Complete hackathon-ready full-stack project that demonstrates the submitted idea end to end",
+        "Frontend app, backend API, database schema/models, auth when relevant, seed/sample data, tests, and deployment instructions",
+        "README.md with setup, features, demo instructions, architecture, and provider usage notes",
+        "Project-specific demo materials in demo/script.md, demo/storyboard.md, demo/demo_walkthrough.md, and demo/video_outline.md",
     ),
     "allowedToolsAndAPIs": (
-        "Use NVIDIA/Nemotron APIs for reasoning, embeddings, and reranking when configured",
+        "Use provider APIs for reasoning and embeddings when configured",
         "Use GitHub API through backend-owned OAuth or backend environment credentials only",
         "Use Supabase Postgres and pgvector for RAG, memory, audit, and shared project state",
     ),
     "requiredRepositoryFormat": (
         "README.md at the repository root",
-        "docs/ARCHITECTURE.md and docs/BUILD_LOG.md for judge-visible evidence",
+        "docs/ARCHITECTURE.md, docs/API_SPEC.md, docs/DATABASE_SCHEMA.sql, docs/DEPLOY.md, docs/BUILD_LOG.md, and docs/HACKATHON_SUBMISSION.md for judge-visible evidence",
+        "demo/ folder with project-specific video script, storyboard, walkthrough, and outline",
+        "data/seed.json or equivalent seed script with realistic sample data",
         ".env.example may be committed with placeholders; real .env files must never be committed",
     ),
     "requiredDemoFormat": (
         "Frontend launches the project and shows flight-stage progress",
         "Orchestrator retrieves RAG evidence before planning and GitHub actions",
-        "Final landing card shows repository, commit, build log, and architecture links",
+        "Final landing card shows repository, commit, build log, architecture, and demo material links",
     ),
     "requiredTechStackPieces": (
         "Use sponsor-required technologies when RAG or rules mention them",
-        "Choose a project-specific stack; do not assume MVPilot's host stack",
+        "Choose a project-specific stack; do not assume GemPilot's host stack",
         "Document AI, database, auth, and deployment choices in README and architecture docs",
     ),
 }
 
 FALLBACK_SCOPE_WARNINGS: tuple[str, ...] = (
     "No strong RAG evidence was retrieved; Stack Selector must infer a project-specific stack.",
-    "MVPilot host platform defaults are not the generated project stack.",
+    "GemPilot host platform defaults are not the generated project stack.",
     "Never expose frontend-submitted or backend-owned secrets in generated files.",
 )
 
@@ -247,7 +251,7 @@ async def build_build_context_response(request: BuildContextRequest) -> BuildCon
             ScopeWarningItem(
                 item=item,
                 reason="Default safety context used because vector retrieval returned no evidence.",
-                source="mvpilot_default_build_context",
+                source="gempilot_default_build_context",
             )
             for item in FALLBACK_SCOPE_WARNINGS
         )
@@ -315,8 +319,8 @@ def _default_items(category: BuildContextResponseCategory) -> list[BuildContextI
         BuildContextItem(
             item=item,
             priority="high",
-            reason="Default MVPilot build context used because RAG did not return this category.",
-            source="mvpilot_default_build_context",
+            reason="Default GemPilot build context used because RAG did not return this category.",
+            source="gempilot_default_build_context",
         )
         for item in FALLBACK_BUILD_ITEMS[category]
     ]
@@ -420,7 +424,7 @@ def _build_agent_boundaries(chunks: list[RagSearchResult]) -> dict[str, Any]:
         ]
     return {
         "rules": _unique_strings(boundaries),
-        "source": "rag_evidence" if chunks else "mvpilot_default_build_context",
+        "source": "rag_evidence" if chunks else "gempilot_default_build_context",
     }
 
 
@@ -497,7 +501,7 @@ def _resolved_stack_reason(source: ResolvedTechStackSource) -> str:
         "request_preference": "User stack preferences captured; Stack Selector Agent will finalize the project stack.",
         "default": (
             "No RAG or user stack yet. Stack Selector Agent must recommend a project-specific stack "
-            "(MVPilot host defaults in defaultItems are not the generated project stack)."
+            "(GemPilot host defaults in defaultItems are not the generated project stack)."
         ),
         "mixed": "RAG and user hints collected; Stack Selector Agent will produce the binding project stack.",
         "stack_recommendation": "Binding stack from Stack Selector Agent for the generated project.",

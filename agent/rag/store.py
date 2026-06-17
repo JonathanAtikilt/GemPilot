@@ -114,8 +114,20 @@ class SupabaseRagStore:
             raise RuntimeError(f"Failed to {action}: {error}")
 
 
+_rag_store: SupabaseRagStore | None = None
+
+
+def reset_rag_store() -> None:
+    """Clear the cached store (used by tests and env reload paths)."""
+    global _rag_store
+    _rag_store = None
+
+
 def get_rag_store() -> SupabaseRagStore:
-    return SupabaseRagStore()
+    global _rag_store
+    if _rag_store is None:
+        _rag_store = SupabaseRagStore()
+    return _rag_store
 
 
 def _summarize_sources(rows: list[dict[str, Any]]) -> list[RagSourceSummary]:

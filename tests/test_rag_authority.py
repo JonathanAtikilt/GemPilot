@@ -5,7 +5,7 @@ from agent.rag.types import SourceDocument
 
 def test_authority_scores_match_source_priority() -> None:
     assert authority_score_for_doc_type("hackathon_rules") == 1.0
-    assert authority_score_for_doc_type("nvidia_docs") == 0.95
+    assert authority_score_for_doc_type("ai_provider_docs") == 0.95
     assert authority_score_for_doc_type("generated_project_doc") == 0.85
     assert authority_score_for_doc_type("build_log") == 0.75
     assert authority_score_for_doc_type("team_notes") == 0.5

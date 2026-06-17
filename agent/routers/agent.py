@@ -26,20 +26,6 @@ orchestrator_router = APIRouter(prefix="/api/orchestrator")
 FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
 
 
-@router.post(
-    "/run",
-    response_model=RunAgentResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def run_agent(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    service: AgentService = Depends(get_agent_service),
-) -> RunAgentResponse:
-    run_request = await _parse_run_agent_request(request)
-    return await service.start_task(run_request, background_tasks=background_tasks)
-
-
 @orchestrator_router.post(
     "/start-project",
     response_model=RunAgentResponse,
@@ -52,6 +38,9 @@ async def start_project(
 ) -> RunAgentResponse:
     run_request = await _parse_run_agent_request(request)
     return await service.start_task(run_request, background_tasks=background_tasks)
+
+
+router.add_api_route("/agent/run", start_project, methods=["POST"])
 
 
 @router.get("/tasks/{task_id}", response_model=TaskDetailResponse)
@@ -161,13 +150,13 @@ async def _read_form_payload(request: Request) -> dict[str, Any]:
         "target_platform": form.get("target_platform")
         or form.get("targetPlatform")
         or "web app",
-        "use_openclaw_orchestration": (
+        "use_runtime_orchestration": (
             _truthy_form_value(
-                form.get("use_openclaw_orchestration")
-                or form.get("useOpenClawOrchestration")
+                form.get("use_runtime_orchestration")
+                or form.get("useRuntimeOrchestration")
             )
-            if form.get("use_openclaw_orchestration") is not None
-            or form.get("useOpenClawOrchestration") is not None
+            if form.get("use_runtime_orchestration") is not None
+            or form.get("useRuntimeOrchestration") is not None
             else True
         ),
     }

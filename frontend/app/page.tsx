@@ -28,7 +28,6 @@ type WorkflowStep = {
 
 type RagEvidence = {
   source: string;
-  docType?: string;
   doc_type?: string;
   chunkId?: string;
   chunk_id?: string;
@@ -176,23 +175,17 @@ type AdditionalSource =
   | { id: number; type: "url"; value: string }
   | { id: number; type: "file"; file: File | null };
 
-const BRAND_NAME = "NemoPilot";
+const BRAND_NAME = "GemPilot";
 
-const defaultTitle = "StudyPilot";
-const defaultIdea =
-  "Build StudyPilot, an AI study planner that turns messy course goals into weekly plans, focus sessions, and progress dashboards for college students.";
+const defaultTitle = "";
+const defaultIdea = "";
 /** Optional product/rules URL prefilled for localhost demo; clear the field to skip RAG fetch. */
-const defaultReferenceUrl = "https://www.shortesthack.com/?tab=rules";
-
-const inputClassName =
-  "mt-2 w-full rounded-xl border border-slate-600/80 bg-slate-950/80 px-3.5 py-2.5 text-sm leading-6 text-slate-100 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25";
-
-const labelClassName = "block text-sm font-medium text-slate-300";
+const defaultReferenceUrl = "";
 
 const flightStops: AgentStep[] = [
   { key: "preflight", phase: "Setup", title: "Getting started", detail: "Your idea, GitHub connection, and optional reference materials.", status: "Ready" },
   { key: "radar_scan", phase: "Context", title: "Gathering context", detail: "Rules, docs, uploads, and RAG evidence for your project.", status: "Pending" },
-  { key: "flight_plan", phase: "Plan", title: "Planning", detail: "Nemotron designs requirements, stack, and architecture.", status: "Pending" },
+  { key: "flight_plan", phase: "Plan", title: "Planning", detail: "The configured LLM designs requirements, stack, and architecture.", status: "Pending" },
   { key: "autopilot", phase: "Build", title: "Building", detail: "Code generation, validation, and GitHub export.", status: "Pending" },
   { key: "black_box", phase: "Logs", title: "Recording progress", detail: "Agent logs, decisions, and artifacts saved for review.", status: "Pending" },
   { key: "landed", phase: "Done", title: "Ready to ship", detail: "Repository, docs, and demo materials are available.", status: "Pending" },
@@ -200,7 +193,7 @@ const flightStops: AgentStep[] = [
 
 const sourceTypes = [
   "Product, rules, or API documentation URL (optional)",
-  "Extra Nemotron or OpenClaw documentation links",
+  "Extra provider, framework, or product documentation links",
   "Uploaded README, Markdown, text, JSON, or CSV files",
 ];
 
@@ -212,19 +205,19 @@ type GithubOAuthConfig = {
 
 function clearGithubConnectingFlags() {
   if (typeof window === "undefined") return;
-  window.sessionStorage.removeItem("mvpilot_github_connecting");
-  window.sessionStorage.removeItem("mvpilot_github_connecting_at");
+  window.sessionStorage.removeItem("gempilot_github_connecting");
+  window.sessionStorage.removeItem("gempilot_github_connecting_at");
 }
 
 function markGithubConnecting() {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem("mvpilot_github_connecting", "true");
-  window.sessionStorage.setItem("mvpilot_github_connecting_at", String(Date.now()));
+  window.sessionStorage.setItem("gempilot_github_connecting", "true");
+  window.sessionStorage.setItem("gempilot_github_connecting_at", String(Date.now()));
 }
 
 function githubConnectingExpired(): boolean {
   if (typeof window === "undefined") return false;
-  const startedAt = Number(window.sessionStorage.getItem("mvpilot_github_connecting_at") || "0");
+  const startedAt = Number(window.sessionStorage.getItem("gempilot_github_connecting_at") || "0");
   if (!startedAt) return false;
   return Date.now() - startedAt > 120_000;
 }
@@ -249,14 +242,14 @@ function readGithubCallbackState(): {
   }
 
   if (connectionId && (status === "connected" || status === "ready")) {
-    window.sessionStorage.setItem("mvpilot_github_connection_id", connectionId);
-    if (username) window.sessionStorage.setItem("mvpilot_github_username", username);
+    window.sessionStorage.setItem("gempilot_github_connection_id", connectionId);
+    if (username) window.sessionStorage.setItem("gempilot_github_username", username);
     clearGithubConnectingFlags();
     return { connectionId, username, error: null };
   }
 
-  const stored = window.sessionStorage.getItem("mvpilot_github_connection_id");
-  const storedUsername = window.sessionStorage.getItem("mvpilot_github_username");
+  const stored = window.sessionStorage.getItem("gempilot_github_connection_id");
+  const storedUsername = window.sessionStorage.getItem("gempilot_github_username");
   return { connectionId: stored, username: storedUsername, error: null };
 }
 
@@ -340,7 +333,7 @@ function ProgressMarker({ progress }: { progress: number }) {
   return (
     <div className="absolute top-0 z-20 -translate-x-1/2 transition-all duration-700" style={{ left: `${progress}%` }}>
       <div className="flex items-center gap-1.5 rounded-full border border-indigo-400/60 bg-indigo-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow-lg shadow-indigo-500/30">
-        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[9px]">NP</span>
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[9px]" />
         Build
       </div>
     </div>
@@ -386,22 +379,20 @@ function deriveFlightStageState(taskDetail: TaskDetail | null, hasLaunched: bool
 export default function Home() {
   const [projectTitle, setProjectTitle] = useState(defaultTitle);
   const [idea, setIdea] = useState(defaultIdea);
-  const [targetUsers, setTargetUsers] = useState("College students balancing multiple courses");
-  const [techStackPreference, setTechStackPreference] = useState("React + Vite frontend, FastAPI backend, Postgres-ready schema");
-  const [requiredFeatures, setRequiredFeatures] = useState(
-    "Study goal intake, weekly plan generator, focus session tracker, progress dashboard, API health check",
-  );
+  const [targetUsers, setTargetUsers] = useState("");
+  const [techStackPreference, setTechStackPreference] = useState("");
+  const [requiredFeatures, setRequiredFeatures] = useState("");
   const [projectDepth, setProjectDepth] = useState<ProjectDepth>("Advanced Project");
   const [targetPlatform, setTargetPlatform] = useState("web app");
-  const [useOpenClawOrchestration, setUseOpenClawOrchestration] = useState(true);
+  const [useRuntimeOrchestration, setUseRuntimeOrchestration] = useState(true);
   const [repoDescription, setRepoDescription] = useState(
-    `StudyPilot — a full project generated by ${BRAND_NAME}.`,
+    `A full project generated by ${BRAND_NAME}.`,
   );
   const [primaryRulesUrl, setPrimaryRulesUrl] = useState(defaultReferenceUrl);
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
   const [nextSourceType, setNextSourceType] = useState<AdditionalSourceType>("url");
   const [repoPreference, setRepoPreference] = useState<RepoPreference>("create_new_repo");
-  const [requestedRepoName, setRequestedRepoName] = useState("mvpilot-generated-studypilot");
+  const [requestedRepoName, setRequestedRepoName] = useState("");
   const [existingRepoUrl, setExistingRepoUrl] = useState("");
   const [visibility, setVisibility] = useState<RepoVisibility>("private");
   const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null);
@@ -421,7 +412,7 @@ export default function Home() {
 
     async function restoreGithubSession() {
       const { connectionId, username, error } = readGithubCallbackState();
-      const wasConnecting = window.sessionStorage.getItem("mvpilot_github_connecting") === "true";
+      const wasConnecting = window.sessionStorage.getItem("gempilot_github_connecting") === "true";
 
       if (error) {
         setGithubMessage(error);
@@ -462,7 +453,7 @@ export default function Home() {
 
     void restoreGithubSession();
 
-    const storedTaskId = window.sessionStorage.getItem("mvpilot_task_id");
+    const storedTaskId = window.sessionStorage.getItem("gempilot_task_id");
     if (storedTaskId) {
       window.setTimeout(() => {
         setTaskId(storedTaskId);
@@ -487,7 +478,7 @@ export default function Home() {
           );
         }
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => { console.error("Failed to fetch GitHub config:", err); return undefined; });
   }, []);
 
   useEffect(() => {
@@ -501,8 +492,7 @@ export default function Home() {
       }, 0);
       return;
     }
-    const githubApiBaseUrl = apiBaseUrl;
-
+    const resolvedApiBase: string = apiBaseUrl;
     let cancelled = false;
 
     async function pollGithubConnection() {
@@ -526,7 +516,7 @@ export default function Home() {
 
       if (!connectionId) return;
 
-      const status = await fetchGithubStatus(githubApiBaseUrl, connectionId);
+      const status = await fetchGithubStatus(resolvedApiBase, connectionId);
       if (cancelled) return;
       if (!status.connected) return;
 
@@ -568,7 +558,7 @@ export default function Home() {
         const status = detail.task.status;
         if (status === "completed") {
           setSubmitState("sent");
-          setMessage("MVP landed. Review the evidence, build log, and GitHub links below.");
+          setMessage("Full-stack project landed. Review the evidence, build log, demo materials, and GitHub links below.");
           return;
         }
         if (status === "failed") {
@@ -598,7 +588,7 @@ export default function Home() {
       title: projectTitle.trim() || "Untitled project idea",
       projectDepth,
       targetPlatform,
-      useOpenClawOrchestration,
+      useRuntimeOrchestration,
       idea,
       github_connected: Boolean(githubConnectionId),
       github_connection_id: githubConnectionId,
@@ -625,9 +615,9 @@ export default function Home() {
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean),
-      source: "mvpilot_frontend",
+      source: "gempilot_frontend",
     }),
-    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectDepth, projectTitle, repoDescription, repoPreference, requestedRepoName, requiredFeatures, targetPlatform, targetUsers, techStackPreference, useOpenClawOrchestration, visibility],
+    [additionalSources, existingRepoUrl, githubConnectionId, idea, primaryRulesUrl, projectDepth, projectTitle, repoDescription, repoPreference, requestedRepoName, requiredFeatures, targetPlatform, targetUsers, techStackPreference, useRuntimeOrchestration, visibility],
   );
 
   const buildTimeline = taskDetail?.build_timeline ?? [];
@@ -708,7 +698,7 @@ export default function Home() {
     setTaskDetail(null);
     setSubmitState("idle");
     setMessage(`Tell us about your project, then click Start building.`);
-    window.sessionStorage.removeItem("mvpilot_task_id");
+    window.sessionStorage.removeItem("gempilot_task_id");
   }
 
   async function disconnectGitHub() {
@@ -721,8 +711,8 @@ export default function Home() {
     setGithubConnectionId(null);
     setGithubUsername(null);
     setGithubStatus("not_connected");
-    window.sessionStorage.removeItem("mvpilot_github_connection_id");
-    window.sessionStorage.removeItem("mvpilot_github_username");
+    window.sessionStorage.removeItem("gempilot_github_connection_id");
+    window.sessionStorage.removeItem("gempilot_github_username");
     clearGithubConnectingFlags();
     setGithubMessage("GitHub disconnected for this browser session.");
   }
@@ -775,7 +765,7 @@ export default function Home() {
     }
 
     setSubmitState("sending");
-    setMessage("Flight plan filed. Sending the build brief to Person 1's orchestrator...");
+    setMessage(`Flight plan filed. Sending the build brief to ${BRAND_NAME}...`);
 
     const apiBaseUrl = process.env.NEXT_PUBLIC_AGENT_API_URL;
 
@@ -809,10 +799,10 @@ export default function Home() {
     if (targetUsers.trim()) formData.append("targetUsers", targetUsers.trim());
     if (techStackPreference.trim()) formData.append("techStackPreference", techStackPreference.trim());
     payloadPreview.requiredFeatures.forEach((feature) => formData.append("requiredFeatures", feature));
-    formData.append("source", "mvpilot_frontend");
+    formData.append("source", "gempilot_frontend");
     formData.append("projectDepth", projectDepth);
     formData.append("targetPlatform", targetPlatform);
-    formData.append("useOpenClawOrchestration", useOpenClawOrchestration ? "true" : "false");
+    formData.append("useRuntimeOrchestration", useRuntimeOrchestration ? "true" : "false");
 
     if (githubConnectionId) {
       formData.append("github_connected", "true");
@@ -844,7 +834,7 @@ export default function Home() {
       const data = await response.json();
       const launchedTaskId = data.task_id ?? data.id ?? "sent-without-task-id";
       setTaskId(launchedTaskId);
-      window.sessionStorage.setItem("mvpilot_task_id", launchedTaskId);
+      window.sessionStorage.setItem("gempilot_task_id", launchedTaskId);
       setSubmitState("sent");
       setMessage(`${BRAND_NAME} is building your project. You can watch progress below.`);
     } catch (error) {
@@ -859,14 +849,14 @@ export default function Home() {
         <header className="flex h-auto flex-col gap-4 border-b border-[#3a494b]/50 bg-[#0f131c]/80 pb-5 backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 shadow-[0_0_15px_rgba(0,242,255,0.16)]">NP</div>
-              <p className="text-sm font-medium text-indigo-300">Powered by Nemotron</p>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 shadow-[0_0_15px_rgba(0,242,255,0.16)]">GP</div>
+              <p className="text-sm font-medium text-indigo-300">Full-stack hackathon project generator</p>
             </div>
             <h1 className="mt-3 max-w-4xl text-4xl font-bold tracking-normal text-[#e1fdff] lg:text-5xl">
-              Build real software with AI
+              Generate demo-ready full-stack projects
             </h1>
             <p className="mt-3 max-w-3xl text-base leading-7 text-[#b9cacb]">
-              Describe what you want to build, connect GitHub, and NemoPilot will plan the stack, write the code, and push a complete repository for you.
+              Describe what you want to build, connect GitHub, and GemPilot will plan the stack, write the app, validate the code, create demo materials, and push a polished repository for you.
             </p>
           </div>
           <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/70 p-4 backdrop-blur-xl">
@@ -895,7 +885,7 @@ export default function Home() {
                   </div>
 
                   <label className="mt-5 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="project-title">Project title</label>
-                  <input id="project-title" type="text" required value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} placeholder="StudyPilot" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
+                  <input id="project-title" type="text" required value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} placeholder={defaultTitle} className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="idea">Project idea</label>
                   <textarea id="idea" value={idea} onChange={(event) => setIdea(event.target.value)} rows={4} className="mt-2 w-full resize-none rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/40" />
@@ -929,8 +919,8 @@ export default function Home() {
                   </div>
 
                   <label className="mt-4 flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]">
-                    <input type="checkbox" checked={useOpenClawOrchestration} onChange={(event) => setUseOpenClawOrchestration(event.target.checked)} className="rounded border-[#3a494b] bg-[#0a0e17] text-[#00f2ff]" />
-                    Prefer OpenClaw orchestration when configured
+                    <input type="checkbox" checked={useRuntimeOrchestration} onChange={(event) => setUseRuntimeOrchestration(event.target.checked)} className="rounded border-[#3a494b] bg-[#0a0e17] text-[#00f2ff]" />
+                    Use LangGraph workflow telemetry
                   </label>
 
                   <label className="mt-4 block font-mono text-[11px] font-bold uppercase tracking-widest text-[#b9cacb]" htmlFor="repo-description">Repo description</label>
@@ -998,8 +988,8 @@ export default function Home() {
                     {repoPreference === "create_new_repo" ? (
                       <label className="mt-3 block">
                         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#b9cacb]">Repo name</span>
-                        <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} placeholder="mvpilot-generated-your-idea" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
-                        <p className="mt-1 font-mono text-[10px] text-[#849495]">New repos must use the prefix mvpilot-generated- (required for safe GitHub automation).</p>
+                        <input type="text" value={requestedRepoName} onChange={(event) => setRequestedRepoName(event.target.value)} placeholder="gempilot-your-idea" className="mt-2 w-full rounded border border-[#3a494b] bg-[#0a0e17] px-3 py-2 font-mono text-sm leading-6 text-[#e1fdff] outline-none transition focus:border-[#00f2ff]" />
+                        <p className="mt-1 font-mono text-[10px] text-[#849495]">New repos must use the prefix gempilot- (required for safe GitHub automation).</p>
                       </label>
                     ) : (
                       <label className="mt-3 block">
@@ -1125,7 +1115,7 @@ export default function Home() {
                 {recommendedStack ? (
                   <div className="mb-5 rounded-lg border border-[#00f2ff]/25 bg-[#181b25]/75 p-5">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Recommended Tech Stack</p>
-                    <p className="mt-2 text-sm text-[#b9cacb]">Project-specific stack from hackathon rules and scope — not NemoPilot&apos;s host stack.</p>
+                    <p className="mt-2 text-sm text-[#b9cacb]">Project-specific stack from hackathon rules and scope — not GemPilot&apos;s host stack.</p>
                     <ul className="mt-3 grid gap-2 text-sm text-[#dfe2ef] sm:grid-cols-2">
                       {recommendedStack.frontend ? <li>Frontend: {recommendedStack.frontend}</li> : null}
                       {recommendedStack.backend ? <li>Backend: {recommendedStack.backend}</li> : null}
@@ -1157,7 +1147,7 @@ export default function Home() {
                 <div className="grid gap-5 lg:grid-cols-2">
                   <div className="rounded-lg border border-[#00f2ff]/15 bg-[#181b25]/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-[#00f2ff]">Build timeline</p>
-                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{taskDetail?.runtime === "openclaw" ? "OpenClaw orchestration" : "LangGraph orchestration"}</h3>
+                    <h3 className="mt-2 text-xl font-semibold text-[#dfe2ef]">{taskDetail?.runtime === "manual" ? "Manual workflow" : "LangGraph orchestration"}</h3>
                     <div className="mt-4 grid max-h-80 gap-2 overflow-y-auto">
                       {buildTimeline.map((phase) => (
                         <div key={phase.id} className="rounded border border-[#3a494b] bg-[#0a0e17] p-3">
@@ -1268,7 +1258,7 @@ export default function Home() {
                     <div className="mt-4 grid max-h-56 gap-2 overflow-y-auto text-xs text-[#b9cacb]">
                       {ragEvidence.slice(0, 4).map((evidence, index) => (
                         <div key={`${evidence.source}-${index}`} className="rounded border border-[#3a494b] bg-[#0a0e17] p-3">
-                          <p className="font-mono font-bold uppercase tracking-widest text-[#4edea3]">{evidence.docType || evidence.doc_type || "source"} · {typeof evidence.score === "number" ? evidence.score.toFixed(2) : "n/a"}</p>
+                          <p className="font-mono font-bold uppercase tracking-widest text-[#4edea3]">{evidence.doc_type || "source"} · {typeof evidence.score === "number" ? evidence.score.toFixed(2) : "n/a"}</p>
                           <p className="mt-1 font-mono text-[#849495]">{evidence.source}</p>
                           <p className="mt-2 line-clamp-3 leading-5">{evidence.content || evidence.text}</p>
                         </div>
@@ -1310,7 +1300,7 @@ export default function Home() {
                         {commitUrl && <a href={commitUrl} target="_blank" rel="noreferrer" className="inline-flex rounded border border-[#00f2ff]/50 px-3 py-2 font-mono text-xs font-black uppercase tracking-widest text-[#00f2ff]">Commit</a>}
                       </div>
                     ) : (
-                      <p className="mt-3 text-sm leading-6 text-[#b9cacb]">When Person 1 returns repo_url, this card links to the generated project, README, demo script, and pitch.</p>
+                      <p className="mt-3 text-sm leading-6 text-[#b9cacb]">When {BRAND_NAME} finishes the build, this card links to the generated project, README, demo script, and pitch.</p>
                     )}
                     <div className="mt-4 grid gap-2 font-mono text-xs text-[#b9cacb]">
                       <p>Build log: {buildLogPath}</p>

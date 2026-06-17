@@ -4,9 +4,9 @@ from agent.rag.types import SourceDocument
 
 def test_detect_doc_type_from_known_sources() -> None:
     assert detect_doc_type("https://www.shortesthack.com/?tab=rules") == "hackathon_rules"
-    assert detect_doc_type("https://docs.nvidia.com/nim/") == "nvidia_docs"
+    assert detect_doc_type("https://ai.google.dev/gemini-api/docs/") == "ai_provider_docs"
     assert detect_doc_type("rag/sources/hackathon_rules.md") == "hackathon_rules"
-    assert detect_doc_type("rag/sources/nvidia_models.md") == "nvidia_docs"
+    assert detect_doc_type("rag/sources/provider_models.md") == "ai_provider_docs"
     assert detect_doc_type("rag/sources/team_notes.md") == "team_notes"
     assert detect_doc_type("README.md") == "generated_project_doc"
     assert detect_doc_type("logs/build_log.md") == "build_log"

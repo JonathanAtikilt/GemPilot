@@ -1,7 +1,6 @@
 .env
 .env.*
 !.env.example
-!.env.openclaw.example
 
 node_modules/
 .venv/
@@ -13,9 +12,20 @@ __pycache__/
 .pytest_cache/
 .tmp_pytest/
 .coverage
+.coverage.*
 htmlcov/
 *.egg-info/
 logs/*.log
 
 .idea/
 .playwright-mcp/
+
+# TypeScript build cache
+frontend/tsconfig.tsbuildinfo
+
+# Supabase CLI state (not project config)
+supabase/.temp/
+supabase/.branches/
+
+# Runtime logs (*.md in logs/ are also transient)
+logs/

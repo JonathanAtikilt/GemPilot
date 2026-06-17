@@ -1,4 +1,4 @@
-"""GitHub tools for creating and verifying generated MVP repositories."""
+"""GitHub tools for creating and verifying generated full-stack project repositories."""
 
 from __future__ import annotations
 

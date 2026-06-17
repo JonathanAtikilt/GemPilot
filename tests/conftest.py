@@ -27,7 +27,7 @@ def _sample_rag_chunks() -> list[RagSearchResult]:
             title="Allowed Tools and APIs",
             doc_type="allowed_tools_apis",
             authority_score=0.93,
-            text="# Allowed Tools and APIs\n\n- NVIDIA API\n- GitHub API",
+            text="# Allowed Tools and APIs\n\n- Google AI API\n- GitHub API",
             metadata={"section_heading": "Allowed Tools and APIs"},
             score=0.9,
             similarity=0.9,
@@ -77,12 +77,12 @@ def _sample_rag_chunks() -> list[RagSearchResult]:
             similarity=0.95,
         ),
         RagSearchResult(
-            chunk_id="nvidia-0",
-            source="rag/sources/nvidia_models.md",
-            title="NVIDIA Models",
-            doc_type="nvidia_docs",
+            chunk_id="provider-0",
+            source="rag/sources/provider_models.md",
+            title="Google AI Models",
+            doc_type="ai_provider_docs",
             authority_score=0.95,
-            text="# NVIDIA Models\n\n- Use Nemotron for orchestration.",
+            text="# Google AI Models\n\n- Use Gemini for orchestration.",
             metadata={},
             score=0.91,
             similarity=0.91,
@@ -114,7 +114,7 @@ def _sample_rag_chunks() -> list[RagSearchResult]:
 
 @pytest.fixture
 def settings(monkeypatch) -> Settings:
-    monkeypatch.delenv("OPENCLAW_API_KEY", raising=False)
+    monkeypatch.delenv("LANGGRAPH_RUNTIME", raising=False)
     return Settings(
         _env_file=None,
         adapter_mode="mock",
@@ -130,6 +130,15 @@ def app(settings: Settings):
 def client(app) -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(autouse=True)
+def reset_rag_store_cache() -> Iterator[None]:
+    from agent.rag.store import reset_rag_store
+
+    reset_rag_store()
+    yield
+    reset_rag_store()
 
 
 @pytest.fixture

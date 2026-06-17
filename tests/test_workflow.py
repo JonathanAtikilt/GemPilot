@@ -11,7 +11,7 @@ from agent.github_oauth import GitHubWorkflowAuth
 from agent.stack_recommendation import stack_items_from_recommended
 from agent.model_client import ModelCallResult
 from agent.workflow import (
-    _require_live_nemotron_result,
+    _require_live_model_result,
     build_initial_state,
     build_workflow,
     route_after_tool_result,
@@ -78,7 +78,7 @@ class EmptyRagAdapter:
     async def retrieve_hackathon_context(self, idea: str) -> list[dict]:
         return []
 
-    async def retrieve_nvidia_context(self, idea: str) -> list[dict]:
+    async def retrieve_provider_context(self, idea: str) -> list[dict]:
         return []
 
     async def find_similar_builds(self, issue: str) -> list[dict]:
@@ -218,13 +218,11 @@ async def test_full_workflow_completes_with_expected_timeline(mock_live_rag_sear
         "scope_mvp",
         "recommend_stack",
         "plan_repo",
-        "generate_files",
         "handle_blocker",
         "generate_final_package",
     }
-    assert model_backed_steps["scope_mvp"].model == settings.nemotron_model
-    assert model_backed_steps["plan_repo"].model == settings.nemotron_model
-    assert model_backed_steps["generate_files"].model == settings.nemotron_model
+    assert model_backed_steps["scope_mvp"].model == settings.llm_model_name
+    assert model_backed_steps["plan_repo"].model == settings.llm_model_name
     assert all(step.model_mode == "mock" for step in model_backed_steps.values())
     assert all(step.decision_trace for step in detail.agent_steps)
     assert detail.final_report["readme"]["content"]
@@ -296,7 +294,7 @@ async def test_workflow_plan_repo_prompt_uses_recommended_stack_after_selector(m
     assert final_state["build_context"]["resolvedTechStack"]["source"] == "stack_recommendation"
     assert "Recommended stack (binding)" in plan_prompt or "recommendedStack" in plan_prompt
     assert "recommend_stack" in model_client.prompts
-    assert "Do not assume the generated project must use MVPilot" in model_client.prompts["recommend_stack"]
+    assert "Do not assume the generated project must use GemPilot" in model_client.prompts["recommend_stack"]
     assert final_state["recommended_stack"]
     assert final_state["repo_plan"]["selected_stack"] == stack_items_from_recommended(
         final_state["recommended_stack"]
@@ -377,7 +375,7 @@ async def test_live_workflow_exchanges_github_connection_before_create_repo(mock
     tools = RecordingToolAdapter()
     workflow = build_workflow(
         settings,
-        model_client=DeterministicModelClient(mode="mock"),
+        model_client=DeterministicModelClient(mode="live"),
         retrieval=EmptyRagAdapter(),
         tools=tools,
         github_connections=github_connections,
@@ -446,7 +444,8 @@ async def test_workflow_memory_integration(mock_live_rag_search):
 
     from unittest.mock import patch, MagicMock, AsyncMock
     with patch("agent.rag.store.get_rag_store") as mock_get_store, \
-         patch("agent.rag.embed.embed_text", new_callable=AsyncMock) as mock_embed:
+         patch("agent.rag.embed.embed_text", new_callable=AsyncMock) as mock_embed, \
+         patch("agent.rag.env_status.is_rag_configured", return_value=True):
         
         mock_store = MagicMock()
         mock_get_store.return_value = mock_store
@@ -498,27 +497,70 @@ def test_require_live_allows_degraded_plan_repo_when_partial_enabled() -> None:
     result = ModelCallResult(
         output=object(),
         mode="degraded",
-        model="nvidia/test",
+        model="gemini-test",
         purpose="plan_repo",
         latency_ms=0,
-        fallback_reason="HTTP 504 from Nemotron.",
+        fallback_reason="HTTP 504 from Gemini.",
     )
-    _require_live_nemotron_result(
+    _require_live_model_result(
         result, "plan_repo", enforced=True, settings=settings
     )
 
 
 def test_require_live_blocks_degraded_file_manifest_when_required() -> None:
-    settings = Settings(allow_idea_aware_partial=True, require_live_file_manifest=True)
+    settings = Settings(
+        _env_file=None,
+        allow_idea_aware_partial=True,
+        require_live_file_manifest=True,
+        gemini_api_key="test-key",
+    )
     result = ModelCallResult(
         output=object(),
         mode="degraded",
-        model="nvidia/test",
+        model="gemini-test",
         purpose="file_manifest",
         latency_ms=0,
-        fallback_reason="HTTP 504 from Nemotron.",
+        fallback_reason="HTTP 504 from Gemini.",
     )
     with pytest.raises(RuntimeError, match="file_manifest"):
-        _require_live_nemotron_result(
+        _require_live_model_result(
             result, "file_manifest", enforced=True, settings=settings
         )
+
+
+@pytest.mark.asyncio
+async def test_service_workflow_completes_with_persisting_store_and_github(
+    mock_live_rag_search,
+) -> None:
+    from agent.github_oauth import GitHubConnectionService, InMemoryGitHubConnectionStore
+    from agent.project_session_store import SupabasePersistingTaskStore
+
+    settings = Settings(_env_file=None, adapter_mode="mock")
+    task_store = SupabasePersistingTaskStore(settings)
+    github_connections = GitHubConnectionService(
+        settings=settings,
+        store=InMemoryGitHubConnectionStore(),
+    )
+    service = AgentService(
+        task_store,
+        settings,
+        github_connections=github_connections,
+    )
+    response = await service.start_task(
+        RunAgentRequest(
+            title="Study Planner",
+            idea=FRONTEND_IDEA,
+            repo_visibility="public",
+            demo_mode=False,
+            source="mvpilot_frontend",
+            github_connected=True,
+            github_connection_id="conn-ready",
+        )
+    )
+
+    await service.run_task_workflow(response.task_id)
+
+    detail = await task_store.get_task(response.task_id)
+    assert detail.task.status == TaskStatus.COMPLETED
+    assert detail.agent_steps
+    assert detail.graph_trace[-1].node_name == "report_result"

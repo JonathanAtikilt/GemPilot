@@ -3,7 +3,7 @@
 import pytest
 
 from agent.config import Settings
-from agent.openclaw_orchestrator import OpenClawOrchestrator
+from agent.orchestrator import Orchestrator
 from agent.stack_recommendation import (
     HOST_PLATFORM_STACK_LABEL,
     align_architecture_plan_with_recommended_stack,
@@ -21,17 +21,17 @@ STUDYPILOT_IDEA = (
 )
 
 
-def test_heuristic_studypilot_prefers_nemotron_when_hackathon_rules_mention_sponsors() -> None:
+def test_heuristic_studypilot_prefers_gemini_when_hackathon_rules_mention_sponsors() -> None:
     build_context = {
         "frontendIntake": {
             "projectDepth": "Hackathon-Winning Project",
             "targetPlatform": "web app",
         },
         "requiredTechStackPieces": [
-            {"item": "Use NVIDIA Nemotron for reasoning and embeddings", "priority": "critical"},
+            {"item": "Use Google AI Gemini for reasoning and embeddings", "priority": "critical"},
         ],
         "allowedToolsAndAPIs": [
-            {"item": "OpenClaw orchestration for agent workflows", "priority": "high"},
+            {"item": "LangGraph orchestration for agent workflows", "priority": "high"},
         ],
         "scopeWarnings": [],
         "evidence": [],
@@ -46,8 +46,8 @@ def test_heuristic_studypilot_prefers_nemotron_when_hackathon_rules_mention_spon
     )
 
     items_text = " ".join(stack_items_from_recommended(stack)).lower()
-    assert "nemotron" in items_text
-    assert "openclaw" in items_text or "orchestration" in items_text
+    assert "gemini" in items_text
+    assert "langgraph" in items_text or "orchestration" in items_text
     assert any("study" in reason.lower() or "studypilot" in reason.lower() for reason in stack["reasonForChoices"])
     assert any("mvpilot" in alt.lower() or "host" in alt.lower() for alt in stack["rejectedAlternatives"])
     assert "next.js" not in items_text or "study" in stack["frontend"].lower() or "next" in stack["frontend"].lower()
@@ -75,7 +75,7 @@ def test_apply_recommended_stack_sets_binding_resolved_stack() -> None:
     assert merged["resolvedTechStack"]["source"] == "stack_recommendation"
     assert merged["resolvedTechStack"]["items"]
     assert "Next.js" in merged["resolvedTechStack"]["defaultItems"]
-    assert "nemotron" in " ".join(merged["resolvedTechStack"]["items"]).lower()
+    assert "gemini" in " ".join(merged["resolvedTechStack"]["items"]).lower()
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ def test_align_architecture_plan_overwrites_selected_stack() -> None:
         idea=STUDYPILOT_IDEA,
         project_requirements={"project_depth": "Hackathon-Winning Project"},
         build_context={
-            "allowedToolsAndAPIs": [{"item": "NVIDIA Nemotron required", "priority": "critical"}],
+            "allowedToolsAndAPIs": [{"item": "Google AI Gemini required", "priority": "critical"}],
             "frontendIntake": {},
         },
     )
@@ -107,16 +107,16 @@ def test_align_architecture_plan_overwrites_selected_stack() -> None:
         recommended,
     )
     assert plan["selected_stack"] == stack_items_from_recommended(recommended)
-    assert "nemotron" in " ".join(plan["selected_stack"]).lower()
+    assert "gemini" in " ".join(plan["selected_stack"]).lower()
 
 
 def test_compose_project_plan_includes_recommended_stack() -> None:
-    orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
+    orchestrator = Orchestrator(Settings(_env_file=None))
     recommended = recommend_stack_heuristic(
         idea=STUDYPILOT_IDEA,
         project_requirements={"project_depth": "Hackathon-Winning Project"},
         build_context={
-            "allowedToolsAndAPIs": [{"item": "NVIDIA Nemotron required", "priority": "critical"}],
+            "allowedToolsAndAPIs": [{"item": "Google AI Gemini required", "priority": "critical"}],
             "frontendIntake": {},
         },
     )
@@ -130,6 +130,6 @@ def test_compose_project_plan_includes_recommended_stack() -> None:
     )
     assert plan.get("recommended_stack") == recommended
     assert plan.get("selected_stack")
-    assert "nemotron" in str(plan.get("selected_stack")).lower() or any(
-        "nemotron" in str(v).lower() for v in (recommended.get("aiModels") or [])
+    assert "gemini" in str(plan.get("selected_stack")).lower() or any(
+        "gemini" in str(v).lower() for v in (recommended.get("aiModels") or [])
     )

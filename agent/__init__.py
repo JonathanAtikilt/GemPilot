@@ -1,1 +1,1 @@
-"""MVPilot FastAPI backend package."""
+"""GemPilot FastAPI backend."""

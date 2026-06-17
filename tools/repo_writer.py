@@ -1,4 +1,4 @@
-"""Repository writing helpers for generated MVP artifacts."""
+"""Repository writing helpers for generated full-stack project artifacts."""
 
 from __future__ import annotations
 

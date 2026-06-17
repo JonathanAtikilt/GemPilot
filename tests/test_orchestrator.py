@@ -1,11 +1,11 @@
 from agent.build_timeline import default_build_timeline
 from agent.config import Settings
-from agent.openclaw_orchestrator import OpenClawOrchestrator
+from agent.orchestrator import Orchestrator
 
 
 def test_orchestrator_initial_timeline_has_enriched_phases(monkeypatch) -> None:
-    monkeypatch.delenv("OPENCLAW_API_KEY", raising=False)
-    orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
+    monkeypatch.delenv("LANGGRAPH_RUNTIME", raising=False)
+    orchestrator = Orchestrator(Settings(_env_file=None))
     extras = orchestrator.initial_state_extras()
     assert len(extras["build_timeline"]) == 21
     assert extras["build_timeline"][0]["id"] == "idea_intake"
@@ -15,7 +15,7 @@ def test_orchestrator_initial_timeline_has_enriched_phases(monkeypatch) -> None:
 
 
 def test_orchestrator_records_completed_phase() -> None:
-    orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
+    orchestrator = Orchestrator(Settings(_env_file=None))
     state = {"build_timeline": default_build_timeline()}
     update = orchestrator.record_phase(
         state,
@@ -31,7 +31,7 @@ def test_orchestrator_records_completed_phase() -> None:
 
 
 def test_compose_mvp_plan_merges_intake_features() -> None:
-    orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
+    orchestrator = Orchestrator(Settings(_env_file=None))
     plan = orchestrator.compose_mvp_plan(
         idea="Build a referral coordinator",
         intake={
@@ -56,7 +56,7 @@ def test_compose_mvp_plan_merges_intake_features() -> None:
 
 
 def test_compose_mvp_plan_accepts_string_file_paths() -> None:
-    orchestrator = OpenClawOrchestrator(Settings(_env_file=None))
+    orchestrator = Orchestrator(Settings(_env_file=None))
     plan = orchestrator.compose_mvp_plan(
         idea="Build StudyPilot",
         intake={},

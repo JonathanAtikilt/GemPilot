@@ -262,3 +262,31 @@ async def test_exchange_env_token_connection_refreshes_token_from_settings():
     auth = await service.exchange_for_workflow(record.id, task_id="task-env")
 
     assert auth.config.token == "ghp-new-token"
+
+
+def test_build_github_connection_store_falls_back_when_supabase_is_unreachable(monkeypatch):
+    from agent.github_oauth import (
+        GITHUB_STORE_MEMORY,
+        InMemoryGitHubConnectionStore,
+        build_github_connection_store,
+    )
+
+    settings = Settings(
+        _env_file=None,
+        adapter_mode="live",
+        supabase_url="https://example.supabase.co",
+        supabase_service_role_key="service-role-key",
+    )
+
+    class BrokenStore:
+        def ping(self) -> None:
+            raise OSError("nodename nor servname provided, or not known")
+
+    monkeypatch.setattr(
+        "agent.github_oauth.SupabaseGitHubConnectionStore",
+        lambda _settings: BrokenStore(),
+    )
+
+    store, mode = build_github_connection_store(settings)
+    assert isinstance(store, InMemoryGitHubConnectionStore)
+    assert mode == GITHUB_STORE_MEMORY

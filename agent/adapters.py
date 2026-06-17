@@ -1,12 +1,15 @@
+import logging
 from typing import Any, Protocol
 from datetime import UTC, datetime
 
 from agent.schemas import AgentStep
 
+logger = logging.getLogger(__name__)
+
 class RagMemoryAdapter(Protocol):
     async def index_source_urls(self, urls: list[str]) -> dict[str, Any]: ...
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]: ...
-    async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]: ...
+    async def retrieve_provider_context(self, idea: str) -> list[dict[str, Any]]: ...
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]: ...
     async def retrieve_build_context(
         self,
@@ -54,21 +57,16 @@ class AuditAdapter(Protocol):
 
 
 class InMemoryRagMemoryAdapter:
-    """Delegates all retrieval to live Supabase + NVIDIA RAG (no mock snippets)."""
-
-    def __init__(self) -> None:
-        from agent.live_adapters import LiveRagMemoryAdapter
-
-        self._live = LiveRagMemoryAdapter()
+    """Mock-safe retrieval adapter using local build-context helpers."""
 
     async def index_source_urls(self, urls: list[str]) -> dict[str, Any]:
-        return await self._live.index_source_urls(urls)
+        return {"documentsLoaded": 0, "chunksCreated": 0, "skippedUrls": list(urls)}
 
     async def retrieve_hackathon_context(self, idea: str) -> list[dict[str, Any]]:
-        return await self._live.retrieve_hackathon_context(idea)
+        return await _search_context(idea, ["hackathon_rules"])
 
-    async def retrieve_nvidia_context(self, idea: str) -> list[dict[str, Any]]:
-        return await self._live.retrieve_nvidia_context(idea)
+    async def retrieve_provider_context(self, idea: str) -> list[dict[str, Any]]:
+        return await _search_context(idea, ["ai_provider_docs", "llm_model_docs", "llm_model_usage"])
 
     async def retrieve_build_context(
         self,
@@ -81,21 +79,96 @@ class InMemoryRagMemoryAdapter:
         context_needed: list[str] | None = None,
         top_k: int = 8,
     ) -> dict[str, Any]:
-        return await self._live.retrieve_build_context(
-            project_id,
-            idea,
-            optional_params=optional_params,
-            rules_url=rules_url,
-            reference_urls=reference_urls,
-            context_needed=context_needed,
-            top_k=top_k,
-        )
+        del rules_url, reference_urls, context_needed
+        from agent.rag.build_context import get_build_context
+
+        try:
+            response = await get_build_context(project_id, idea, optional_params, top_k=top_k)
+            payload = response.model_dump(mode="json", by_alias=True)
+            payload.setdefault("mode", "live")
+            return payload
+        except Exception:
+            logger.warning("retrieve_build_context failed for project %s; using fallback", project_id, exc_info=True)
+            return _fallback_build_context()
 
     async def find_similar_builds(self, issue: str) -> list[dict[str, Any]]:
-        return await self._live.find_similar_builds(issue)
+        try:
+            from agent.rag.store import get_rag_store
+
+            return await get_rag_store().search_memories(issue)
+        except Exception:
+            logger.warning("find_similar_builds failed for issue %r; returning empty list", issue, exc_info=True)
+            return []
 
     async def write_memory(self, memory: dict[str, Any]) -> None:
-        await self._live.write_memory(memory)
+        try:
+            from agent.rag.store import get_rag_store
+
+            await get_rag_store().write_memory(memory)
+        except Exception:
+            logger.warning("write_memory failed; memory entry was not persisted", exc_info=True)
+            return None
+
+
+async def _search_context(idea: str, doc_types: list[str]) -> list[dict[str, Any]]:
+    try:
+        from agent.rag import build_context
+
+        chunks = await build_context.search_rag(idea, top_k=4, doc_types=doc_types)
+    except Exception:
+        logger.debug("_search_context RAG search failed for doc_types %s; returning empty", doc_types, exc_info=True)
+        return []
+    return [
+        {
+            "source": chunk.source,
+            "title": chunk.title,
+            "doc_type": chunk.doc_type,
+            "text": chunk.text,
+            "score": chunk.score,
+        }
+        for chunk in chunks
+    ]
+
+
+def _fallback_build_context() -> dict[str, Any]:
+    return {
+        "mode": "mock",
+        "requiredDeliverables": [
+            {
+                "item": "Complete hackathon-ready full-stack project",
+                "priority": "high",
+                "reason": "Mock fallback build context.",
+                "source": "in_memory_mock_context",
+            }
+        ],
+        "allowedToolsAndAPIs": [],
+        "requiredRepositoryFormat": [
+            {
+                "item": "README, docs, demo materials, source, tests, seed data, and .env.example",
+                "priority": "high",
+                "reason": "Mock fallback build context.",
+                "source": "in_memory_mock_context",
+            }
+        ],
+        "requiredDemoFormat": [
+            {
+                "item": "demo/script.md, demo/storyboard.md, demo/demo_walkthrough.md, and demo/video_outline.md",
+                "priority": "high",
+                "reason": "Mock fallback build context.",
+                "source": "in_memory_mock_context",
+            }
+        ],
+        "requiredTechStackPieces": [],
+        "agentBoundaries": [],
+        "resolvedTechStack": {
+            "source": "default",
+            "requiredItems": [],
+            "defaultItems": ["React", "FastAPI", "Postgres", "pytest", "npm run build"],
+            "items": ["React", "FastAPI", "Postgres", "pytest", "npm run build"],
+        },
+        "scopeWarnings": [],
+        "evidence": [],
+    }
 
 
 class InMemoryToolAdapter:
@@ -110,7 +183,7 @@ class InMemoryToolAdapter:
         repo_url: str | None = None,
     ) -> dict[str, Any]:
         del repo_description
-        repo_name = repo_name or f"mvpilot-generated-{task_id[:8]}"
+        repo_name = repo_name or f"gempilot-{task_id[:8]}"
         return {
             "tool": "github.create_repo" if repo_preference == "create_new_repo" else "github.use_existing_repo",
             "status": "success",
@@ -138,7 +211,7 @@ class InMemoryToolAdapter:
             "files": files,
             "commit_sha": "mock-commit-0001",
             "commit_url": f"https://github.com/mock-org/{repo_name}/commit/mock-commit-0001",
-            "summary": "Test mode: committed generated MVP package files.",
+            "summary": "Test mode: committed generated full-stack project package files.",
         }
 
     def check_repo_health(self, repo_name: str) -> dict[str, Any]:
@@ -219,7 +292,7 @@ class InMemoryAuditAdapter:
             message=message,
             model=self._model_name,
             decision_trace=[
-                "Mock mode: deterministic Nemotron-style reasoning.",
+                "Mock mode: deterministic provider-backed reasoning.",
                 *decision_trace,
             ],
             timestamp=datetime.now(UTC),

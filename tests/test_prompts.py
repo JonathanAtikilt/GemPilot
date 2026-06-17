@@ -1,4 +1,5 @@
 from agent.prompts import (
+    build_demo_video_generation_prompt,
     build_demo_script_prompt,
     build_file_manifest_prompt,
     build_final_readme_prompt,
@@ -27,7 +28,7 @@ def _default_build_context() -> dict:
                 "Uvicorn",
                 "Supabase Postgres",
                 "pgvector",
-                "NVIDIA Nemotron",
+                "Google AI Gemini",
                 "pytest",
                 "npm run build",
             ],
@@ -42,7 +43,7 @@ def _default_build_context() -> dict:
                 "Uvicorn",
                 "Supabase Postgres",
                 "pgvector",
-                "NVIDIA Nemotron",
+                "Google AI Gemini",
                 "pytest",
                 "npm run build",
             ],
@@ -89,7 +90,7 @@ def test_scope_mvp_prompt_includes_resolved_tech_stack_and_override_rule() -> No
     assert "Frontend intake is the user's source of truth" in prompt
     assert "missing or unreadable sources as warnings" in prompt
     assert "recommendedStack" in prompt or "RAG stack hints" in prompt
-    assert "Do not assume the generated project must use MVPilot" in prompt
+    assert "Do not assume the generated project must use GemPilot" in prompt
     assert "Retrieved docs" not in prompt
 
 
@@ -103,7 +104,7 @@ def test_plan_repo_prompt_includes_default_stack_when_rag_is_silent() -> None:
     assert "Recommended stack (binding)" in prompt or "recommendedStack" in prompt
     assert "Study Planner" in prompt
     assert "Frontend intake is the user's source of truth" in prompt
-    assert "Do not assume the generated project must use MVPilot" in prompt
+    assert "Do not assume the generated project must use GemPilot" in prompt
     assert "full generated repository architecture" in prompt
 
 
@@ -144,4 +145,25 @@ def test_artifact_prompts_include_intake_source_context_and_stack_rules() -> Non
         assert "sourceContext" in prompt
         assert "recommendedStack" in prompt or "resolvedTechStack" in prompt
         assert "Required RAG rules override user preference" in prompt
-        assert "MVPilot" in prompt
+        assert "GemPilot" in prompt
+
+
+def test_demo_video_generation_prompt_requires_project_specific_demo_pack() -> None:
+    prompt = build_demo_video_generation_prompt(
+        idea="Build StudyPilot",
+        product_brief={
+            "core_features": ["Study planner", "Flashcards", "Quizzes"],
+            "user_flows": [{"screen": "Planner", "action": "Create plan", "api": "POST /api/study-plan"}],
+            "api_routes": ["POST /api/study-plan", "GET /api/progress"],
+        },
+        stack={"frontend": "React", "backend": "FastAPI"},
+        architecture={"api_design": ["POST /api/study-plan"]},
+        generated_file_names=["src/App.jsx", "backend/main.py"],
+    )
+
+    assert "Demo Video Generator Agent" in prompt
+    assert "demo/script.md" in prompt
+    assert "demo/storyboard.md" in prompt
+    assert "demo/demo_walkthrough.md" in prompt
+    assert "demo/video_outline.md" in prompt
+    assert "specific to this product" in prompt

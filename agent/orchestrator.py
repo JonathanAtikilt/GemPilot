@@ -9,7 +9,6 @@ from agent.build_timeline import (
     timeline_event,
 )
 from agent.config import Settings
-from agent.openclaw_runtime import openclaw_runtime_ready, registered_openclaw_tools
 from agent.orchestration_pipeline import pipeline_manifest
 
 
@@ -31,8 +30,8 @@ def _stack_label(stack: dict[str, Any]) -> str | None:
     return " · ".join(labels) if labels else None
 
 
-class OpenClawOrchestrator:
-    """OpenClaw-facing orchestration layer for complex project generation.
+class Orchestrator:
+    """LangGraph orchestration layer for complex project generation.
 
     LangGraph still executes nodes; this class owns phase definitions, project plan
     snapshots, agent manifests, and the user-visible build timeline so tools
@@ -41,7 +40,7 @@ class OpenClawOrchestrator:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._runtime = "openclaw" if openclaw_runtime_ready(settings) else "langgraph"
+        self._runtime = "langgraph"
 
     @property
     def runtime(self) -> str:
@@ -49,7 +48,7 @@ class OpenClawOrchestrator:
 
     @property
     def registered_tools(self) -> list[str]:
-        return registered_openclaw_tools() if self._runtime == "openclaw" else []
+        return []
 
     def pipeline_phases(self) -> list[dict[str, str]]:
         return [dict(phase) for phase in BUILD_TIMELINE_PHASES]
@@ -64,7 +63,7 @@ class OpenClawOrchestrator:
             "project_plan": {},
             "agent_logs": [],
             "project_agents": manifest["agents"],
-            "openclaw_pipeline": {
+            "orchestration_pipeline": {
                 "runtime": self._runtime,
                 "phases": manifest["stages"],
                 "agents": manifest["agents"],

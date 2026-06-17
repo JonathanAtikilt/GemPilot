@@ -114,11 +114,11 @@ class RunAgentRequest(BaseModel):
         default="web app",
         validation_alias=AliasChoices("target_platform", "targetPlatform"),
     )
-    use_openclaw_orchestration: bool = Field(
+    use_runtime_orchestration: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "use_openclaw_orchestration",
-            "useOpenClawOrchestration",
+            "use_runtime_orchestration",
+            "useRuntimeOrchestration",
         ),
     )
 
@@ -266,7 +266,7 @@ class TaskDetailResponse(BaseModel):
     task: TaskRecord
     runtime: str = "langgraph"
     registered_tools: list[str] = Field(default_factory=list)
-    openclaw_trace: list[dict[str, Any]] = Field(default_factory=list)
+    runtime_trace: list[dict[str, Any]] = Field(default_factory=list)
     agent_steps: list[AgentStep] = Field(default_factory=list)
     retrieved_docs: list[dict[str, Any]] = Field(default_factory=list)
     build_context: dict[str, Any] | None = None

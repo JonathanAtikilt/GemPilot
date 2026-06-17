@@ -1,1 +1,1 @@
-"""API routers for the MVPilot agent backend."""
+"""API routers for the GemPilot backend."""

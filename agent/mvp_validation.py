@@ -17,6 +17,7 @@ def validate_mvp_output(
     model_modes: list[str],
     require_live_manifest: bool = False,
     manifest_model_mode: str | None = None,
+    allow_degraded_manifest: bool = False,
 ) -> dict[str, Any]:
     return validate_project_output(
         idea=idea,
@@ -27,6 +28,7 @@ def validate_mvp_output(
         model_modes=model_modes,
         require_live_manifest=require_live_manifest,
         manifest_model_mode=manifest_model_mode,
+        allow_degraded_manifest=allow_degraded_manifest,
     )
 
 

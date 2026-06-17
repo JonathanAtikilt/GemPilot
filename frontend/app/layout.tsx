@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NemoPilot — AI project builder",
+  title: "GemPilot — full-stack hackathon project generator",
   description:
-    "Describe your software idea, connect GitHub, and let Nemotron agents plan, build, and export a full project repository.",
+    "Describe your hackathon idea, connect GitHub, and let configurable AI agents plan, build, validate, demo-package, and export a full-stack project repository.",
 };
 
 export default function RootLayout({

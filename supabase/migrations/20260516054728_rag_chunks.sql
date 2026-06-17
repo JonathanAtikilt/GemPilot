@@ -9,7 +9,7 @@ create table if not exists public.rag_chunks (
   text text not null,
   metadata jsonb default '{}'::jsonb,
   authority_score double precision not null default 0.5,
-  embedding extensions.vector(2048),
+  embedding extensions.vector(768),
   created_at timestamptz default now()
 );
 
@@ -19,7 +19,7 @@ create index if not exists rag_chunks_source_idx on public.rag_chunks (source);
 create index if not exists rag_chunks_doc_type_idx on public.rag_chunks (doc_type);
 
 create or replace function public.match_rag_chunks(
-  query_embedding extensions.vector(2048),
+  query_embedding extensions.vector(768),
   match_count int default 10,
   match_threshold float default -1,
   filter_doc_types text[] default null

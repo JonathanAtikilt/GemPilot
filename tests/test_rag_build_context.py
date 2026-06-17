@@ -43,7 +43,7 @@ async def test_get_build_context_returns_all_categories(monkeypatch) -> None:
             source="rag/sources/mvpilot_build_requirements.md",
             doc_type="allowed_tools_apis",
             section_heading="Allowed Tools and APIs",
-            text="# Allowed Tools and APIs\n\n- NVIDIA API\n- GitHub API",
+            text="# Allowed Tools and APIs\n\n- Google AI API\n- GitHub API",
         ),
         _chunk(
             chunk_id="repo-0",
@@ -113,13 +113,13 @@ async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeyp
         BuildContextRequest(projectId="p1", idea="AI teammate", topK=8)
     )
 
-    assert len(response.requiredDeliverables) == 2
+    assert len(response.requiredDeliverables) == 4
     assert all(
         item.source == "mvpilot_default_build_context"
         for item in response.requiredDeliverables
     )
     assert len(response.allowedToolsAndAPIs) == 3
-    assert len(response.requiredRepositoryFormat) == 3
+    assert len(response.requiredRepositoryFormat) == 5
     assert len(response.requiredDemoFormat) == 3
     assert len(response.requiredTechStackPieces) == 3
     assert len(response.scopeWarnings) == 3
@@ -137,7 +137,7 @@ async def test_get_build_context_returns_empty_categories_when_no_chunks(monkeyp
         "Uvicorn",
         "Supabase Postgres",
         "pgvector",
-        "NVIDIA Nemotron",
+        "Google Gemini or Groq/OpenAI-compatible LLM",
         "pytest",
         "npm run build",
     ]

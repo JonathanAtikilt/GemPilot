@@ -1,7 +1,14 @@
 from pathlib import Path
 
 from agent.rag.chunk import chunk_document, detect_doc_type, extract_title
-from agent.rag.config import LOGS_DIR, PROJECT_ROOT, RAG_SOURCES_DIR, get_embedding_model
+from agent.rag.config import (
+    LOGS_DIR,
+    PROJECT_ROOT,
+    RAG_SOURCES_DIR,
+    get_embedding_dimensions,
+    get_embedding_model,
+    get_embedding_provider,
+)
 from agent.rag.embed import embed_text
 from agent.rag.scrape import scrape_configured_urls, scrape_urls
 from agent.rag.url_utils import collect_source_urls
@@ -45,7 +52,12 @@ async def ingest_source_urls(
     for chunk in chunks:
         embedding = await embed_text(chunk.text, input_type="passage")
         chunk.embedding = embedding
-        chunk.metadata = {**chunk.metadata, "embedding_model": get_embedding_model()}
+        chunk.metadata = {
+            **chunk.metadata,
+            "embedding_provider": get_embedding_provider(),
+            "embedding_model": get_embedding_model(),
+            "embedding_dimensions": get_embedding_dimensions(),
+        }
         embedded_chunks.append(chunk)
 
     await store.replace_chunks(embedded_chunks, [document.source for document in documents])
@@ -67,7 +79,12 @@ async def ingest_rag(logs_only: bool = False) -> IngestResponse:
     for chunk in chunks:
         embedding = await embed_text(chunk.text, input_type="passage")
         chunk.embedding = embedding
-        chunk.metadata = {**chunk.metadata, "embedding_model": get_embedding_model()}
+        chunk.metadata = {
+            **chunk.metadata,
+            "embedding_provider": get_embedding_provider(),
+            "embedding_model": get_embedding_model(),
+            "embedding_dimensions": get_embedding_dimensions(),
+        }
         embedded_chunks.append(chunk)
 
     await store.replace_chunks(embedded_chunks, [document.source for document in documents])

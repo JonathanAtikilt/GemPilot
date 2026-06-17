@@ -5,15 +5,16 @@ from typing import Any
 
 from agent.model_outputs import RecommendedStackOutput
 
-# MVPilot host platform — never treat as the default generated-project stack.
+# GemPilot host platform — never treat as the default generated-project stack.
 HOST_PLATFORM_STACK_LABEL = (
-    "MVPilot host platform defaults (orchestrator UI only; not the generated project stack)."
+    "GemPilot host platform defaults (orchestrator UI only; not the generated project stack)."
 )
 
 _SPONSOR_KEYWORDS = (
-    ("nemotron", "aiModels", "NVIDIA Nemotron"),
-    ("nvidia", "aiModels", "NVIDIA Nemotron"),
-    ("openclaw", "orchestration", "OpenClaw"),
+    ("gemini", "aiModels", "Google Gemini"),
+    ("groq", "aiModels", "Groq Llama models"),
+    ("openai", "aiModels", "OpenAI API"),
+    ("langgraph", "orchestration", "LangGraph workflow orchestration"),
     ("pgvector", "vectorStorage", "pgvector on Supabase Postgres"),
     ("supabase", "database", "Supabase Postgres"),
 )
@@ -53,7 +54,7 @@ def recommend_stack_heuristic(
     project_requirements: dict[str, Any] | None,
     build_context: dict[str, Any],
 ) -> dict[str, Any]:
-    """Project-specific stack when live Nemotron is unavailable (explicit degraded path)."""
+    """Project-specific stack when live LLM output is unavailable (explicit degraded path)."""
     requirements = project_requirements or {}
     intake = build_context.get("frontendIntake") or {}
     if not isinstance(intake, dict):
@@ -76,8 +77,8 @@ def recommend_stack_heuristic(
     rules_text = _collect_rule_text(build_context)
     idea_lower = idea.lower()
     study = _mentions(idea_lower, "study", "lecture", "quiz", "flashcard", "exam")
-    sponsor_nemotron = _mentions(rules_text, "nemotron", "nvidia")
-    sponsor_openclaw = "openclaw" in rules_text
+    provider_required = _mentions(rules_text, "gemini", "groq", "openai", "llm")
+    langgraph_required = "langgraph" in rules_text
     hackathon = _mentions(rules_text, "hackathon", "judging", "demo", "sponsor")
 
     if platform in {"api", "backend api"}:
@@ -98,7 +99,7 @@ def recommend_stack_heuristic(
 
     database = (
         "Supabase Postgres"
-        if sponsor_nemotron or _mentions(rules_text, "supabase", "postgres")
+        if _mentions(rules_text, "supabase", "postgres")
         else "PostgreSQL (managed) with migrations"
     )
     authentication = (
@@ -107,37 +108,38 @@ def recommend_stack_heuristic(
         else "Clerk or JWT session auth"
     )
     ai_models: list[str] = []
-    if sponsor_nemotron or study:
-        ai_models.append("NVIDIA Nemotron for summarization, quiz generation, and tutoring")
+    if provider_required or study:
+        ai_models.append("Google Gemini for planning and structured JSON generation")
+        ai_models.append("Groq Llama models for low-latency routing or fallback")
     orchestration: list[str] = []
-    if sponsor_openclaw or sponsor_nemotron:
-        orchestration.append("OpenClaw tool orchestration for agent steps and GitHub export")
+    if langgraph_required or provider_required:
+        orchestration.append("LangGraph workflow orchestration for agent steps and GitHub export")
     rag_retrieval = (
-        "URL + document ingestion with Nemotron embeddings"
-        if sponsor_nemotron
+        "URL + document ingestion with configurable embeddings"
+        if provider_required
         else "Reference URL fetch and chunking"
     )
     vector_storage = (
         "pgvector on Supabase Postgres"
-        if sponsor_nemotron or _mentions(rules_text, "pgvector", "vector")
+        if provider_required or _mentions(rules_text, "pgvector", "vector")
         else "Optional vector store if note search is required at scale"
     )
     if study:
-        rag_retrieval = "Ingest lecture notes (PDF/Markdown); embed with Nemotron; rerank for quiz context"
+        rag_retrieval = "Ingest lecture notes (PDF/Markdown); embed with Gemini or OpenAI; rank by cosine similarity"
         vector_storage = "pgvector on Supabase for note chunks and spaced-repetition metadata"
 
     deployment = (
-        "Vercel (frontend) + Supabase (database/auth) + GPU-backed Nemotron API"
-        if hackathon and sponsor_nemotron
+        "Vercel (frontend) + Supabase (database/auth) + Gemini/Groq API-backed agent service"
+        if hackathon and provider_required
         else "Vercel or Render for frontend; containerized FastAPI; managed Postgres"
     )
     testing = "pytest for backend; Playwright or Vitest for critical UI flows; contract tests for APIs"
 
     alignment: list[str] = []
-    if sponsor_nemotron:
-        alignment.append("Hackathon/RAG context rewards NVIDIA Nemotron — included in aiModels.")
-    if sponsor_openclaw:
-        alignment.append("OpenClaw called out in rules — included in orchestration.")
+    if provider_required:
+        alignment.append("RAG context calls out specific LLM providers — included in aiModels.")
+    if langgraph_required:
+        alignment.append("LangGraph called out in rules — included in orchestration.")
     if hackathon:
         alignment.append("Stack favors fast demo: managed auth/DB and a deployable web UI.")
     if not alignment:
@@ -147,12 +149,12 @@ def recommend_stack_heuristic(
     rejected.append(
         f"Alternative (not default): {HOST_PLATFORM_STACK_LABEL}"
     )
-    if not sponsor_nemotron:
-        rejected.append("Skipped generic MVPilot host stack (Next.js orchestrator + internal LangGraph).")
+    if not provider_required:
+        rejected.append("Skipped generic GemPilot host stack (Next.js orchestrator + internal LangGraph).")
 
     reasons = [
         f"Selected for '{idea[:80]}' at {depth} on {platform}.",
-        "Stack is chosen for the generated product, not copied from MVPilot's host codebase.",
+        "Stack is chosen for the generated product, not copied from GemPilot's host codebase.",
     ]
     if study:
         reasons.append(
@@ -179,7 +181,7 @@ def recommend_stack_heuristic(
         mode="degraded",
         decision_trace=[
             "Stack Selector Agent used explicit degraded heuristics.",
-            "Did not copy MVPilot host platform defaults into the generated project stack.",
+            "Did not copy GemPilot host platform defaults into the generated project stack.",
             *reasons[:2],
         ],
     )
@@ -262,7 +264,7 @@ def align_architecture_plan_with_recommended_stack(
     if not overview:
         aligned["architecture_overview"] = [
             binding_line,
-            "Architecture follows the recommended project stack, not MVPilot host defaults.",
+            "Architecture follows the recommended project stack, not GemPilot host defaults.",
         ]
     elif binding_line not in overview[0]:
         aligned["architecture_overview"] = [binding_line, *overview]

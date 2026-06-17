@@ -10,6 +10,30 @@ from agent.schemas import RunAgentRequest, TaskStatus
 
 
 @pytest.mark.asyncio
+async def test_persisting_store_append_agent_steps_delegates_to_memory() -> None:
+    settings = Settings(_env_file=None, adapter_mode="live")
+    store = SupabasePersistingTaskStore(settings)
+    request = RunAgentRequest(
+        idea="StudyPilot helps students learn.",
+        repo_visibility="public",
+    )
+    task = await store.create_task(request)
+    detail = await store.append_agent_steps(
+        task.id,
+        [
+            {
+                "node_name": "receive_idea",
+                "status": "completed",
+                "message": "Received idea",
+                "decision_trace": ["ok"],
+            }
+        ],
+    )
+    assert len(detail.agent_steps) == 1
+    assert detail.agent_steps[0]["node_name"] == "receive_idea"
+
+
+@pytest.mark.asyncio
 async def test_persisting_store_writes_session_on_snapshot(monkeypatch) -> None:
     settings = Settings(
         _env_file=None,
@@ -33,7 +57,7 @@ async def test_persisting_store_writes_session_on_snapshot(monkeypatch) -> None:
         target_platform="web app",
     )
     task = await store.create_task(request)
-    recommended = {"frontend": "Next.js", "backend": "FastAPI", "aiModels": ["Nemotron"]}
+    recommended = {"frontend": "Next.js", "backend": "FastAPI", "aiModels": ["Gemini"]}
 
     await store.snapshot_task(
         task.id,

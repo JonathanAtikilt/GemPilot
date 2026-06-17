@@ -33,148 +33,158 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("ALLOW_DEGRADED_MODE", "ALLOW_IDEA_AWARE_PARTIAL"),
     )
-    nemotron_fast_fallback: bool = Field(
+    llm_fast_fallback: bool = Field(
         default=False,
-        validation_alias="NEMOTRON_FAST_FALLBACK",
+        validation_alias="LLM_FAST_FALLBACK",
     )
-    nemotron_live_attempt_timeout_seconds: float = Field(
+    llm_live_attempt_timeout_seconds: float = Field(
         default=75,
         gt=0,
-        validation_alias="NEMOTRON_LIVE_ATTEMPT_TIMEOUT_SECONDS",
+        validation_alias="LLM_LIVE_ATTEMPT_TIMEOUT_SECONDS",
     )
-    nemotron_fast_fallback_max_retries: int = Field(
+    llm_fast_fallback_max_retries: int = Field(
         default=0,
         ge=0,
-        validation_alias="NEMOTRON_FAST_FALLBACK_MAX_RETRIES",
+        validation_alias="LLM_FAST_FALLBACK_MAX_RETRIES",
     )
-    nemotron_fast_fallback_poll_max_seconds: float = Field(
+    llm_fast_fallback_poll_max_seconds: float = Field(
         default=90,
         gt=0,
-        validation_alias="NEMOTRON_FAST_FALLBACK_POLL_MAX_SECONDS",
+        validation_alias="LLM_FAST_FALLBACK_POLL_MAX_SECONDS",
     )
     mock_mode_override: bool | None = Field(
         default=None,
         validation_alias="MOCK_MODE",
     )
-    nvidia_api_key: SecretStr | None = Field(
+    llm_provider: Literal["gemini", "groq", "openai"] = Field(
+        default="gemini",
+        validation_alias="LLM_PROVIDER",
+    )
+    gemini_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("NEMOTRON_API_KEY", "NVIDIA_API_KEY"),
+        validation_alias="GEMINI_API_KEY",
     )
-    nemotron_model: str = Field(
-        default="nvidia/nemotron-3-super-120b-a12b",
-        validation_alias="NEMOTRON_MODEL",
+    groq_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="GROQ_API_KEY",
     )
-    nemotron_fast_model: str = Field(
-        default="nvidia/nvidia-nemotron-nano-9b-v2",
-        validation_alias="NEMOTRON_FAST_MODEL",
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
     )
-    nemotron_base_url: str = Field(
-        default="https://integrate.api.nvidia.com/v1",
-        validation_alias="NEMOTRON_BASE_URL",
+    llm_model: str | None = Field(
+        default=None,
+        validation_alias="LLM_MODEL",
     )
-    nemotron_timeout_seconds: float = Field(
-        default=900,
+    llm_fallback_model: str | None = Field(
+        default=None,
+        validation_alias="LLM_FALLBACK_MODEL",
+    )
+    gemini_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        validation_alias="GEMINI_BASE_URL",
+    )
+    groq_base_url: str = Field(
+        default="https://api.groq.com/openai/v1",
+        validation_alias="GROQ_BASE_URL",
+    )
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias="OPENAI_BASE_URL",
+    )
+    llm_timeout_seconds: float = Field(
+        default=300,
         gt=0,
-        validation_alias="NEMOTRON_TIMEOUT_SECONDS",
+        validation_alias="LLM_TIMEOUT_SECONDS",
     )
-    nemotron_strict_timeout_seconds: float = Field(
-        default=900,
+    llm_strict_timeout_seconds: float = Field(
+        default=300,
         gt=0,
-        validation_alias="NEMOTRON_STRICT_TIMEOUT_SECONDS",
+        validation_alias="LLM_STRICT_TIMEOUT_SECONDS",
     )
-    nemotron_file_manifest_timeout_seconds: float = Field(
-        default=1200,
+    llm_file_manifest_timeout_seconds: float = Field(
+        default=600,
         gt=0,
-        validation_alias="NEMOTRON_FILE_MANIFEST_TIMEOUT_SECONDS",
+        validation_alias="LLM_FILE_MANIFEST_TIMEOUT_SECONDS",
     )
-    nemotron_repo_plan_timeout_seconds: float = Field(
-        default=1200,
+    llm_repo_plan_timeout_seconds: float = Field(
+        default=600,
         gt=0,
-        validation_alias="NEMOTRON_REPO_PLAN_TIMEOUT_SECONDS",
+        validation_alias="LLM_REPO_PLAN_TIMEOUT_SECONDS",
     )
-    nemotron_max_retries: int = Field(
-        default=3,
-        ge=0,
-        validation_alias="NEMOTRON_MAX_RETRIES",
-    )
-    nemotron_poll_attempts: int = Field(
-        default=90,
-        ge=1,
-        validation_alias="NEMOTRON_POLL_ATTEMPTS",
-    )
-    nemotron_poll_interval_seconds: float = Field(
+    llm_max_retries: int = Field(
         default=2,
         ge=0,
-        validation_alias="NEMOTRON_POLL_INTERVAL_SECONDS",
+        validation_alias="LLM_MAX_RETRIES",
     )
-    nemotron_poll_max_seconds: float = Field(
-        default=3600,
-        gt=0,
-        validation_alias="NEMOTRON_POLL_MAX_SECONDS",
+    llm_poll_attempts: int = Field(
+        default=1,
+        ge=1,
+        validation_alias="LLM_POLL_ATTEMPTS",
     )
-    nemotron_file_manifest_poll_max_seconds: float = Field(
-        default=3600,
-        gt=0,
-        validation_alias="NEMOTRON_FILE_MANIFEST_POLL_MAX_SECONDS",
-    )
-    nemotron_repo_plan_poll_max_seconds: float = Field(
-        default=3600,
-        gt=0,
-        validation_alias="NEMOTRON_REPO_PLAN_POLL_MAX_SECONDS",
-    )
-    nemotron_repo_plan_max_retries: int = Field(
-        default=5,
+    llm_poll_interval_seconds: float = Field(
+        default=0,
         ge=0,
-        validation_alias="NEMOTRON_REPO_PLAN_MAX_RETRIES",
+        validation_alias="LLM_POLL_INTERVAL_SECONDS",
     )
-    nemotron_reasoning_effort: str = Field(
+    llm_poll_max_seconds: float = Field(
+        default=300,
+        gt=0,
+        validation_alias="LLM_POLL_MAX_SECONDS",
+    )
+    llm_file_manifest_poll_max_seconds: float = Field(
+        default=600,
+        gt=0,
+        validation_alias="LLM_FILE_MANIFEST_POLL_MAX_SECONDS",
+    )
+    llm_repo_plan_poll_max_seconds: float = Field(
+        default=600,
+        gt=0,
+        validation_alias="LLM_REPO_PLAN_POLL_MAX_SECONDS",
+    )
+    llm_repo_plan_max_retries: int = Field(
+        default=3,
+        ge=0,
+        validation_alias="LLM_REPO_PLAN_MAX_RETRIES",
+    )
+    llm_reasoning_effort: str = Field(
         default="none",
-        validation_alias="NEMOTRON_REASONING_EFFORT",
+        validation_alias="LLM_REASONING_EFFORT",
     )
-    nemotron_planning_max_tokens: int = Field(
+    llm_planning_max_tokens: int = Field(
         default=2500,
         ge=900,
-        validation_alias="NEMOTRON_PLANNING_MAX_TOKENS",
+        validation_alias="LLM_PLANNING_MAX_TOKENS",
     )
-    nemotron_repo_plan_max_tokens: int = Field(
+    llm_repo_plan_max_tokens: int = Field(
         default=6000,
         ge=2000,
-        validation_alias="NEMOTRON_REPO_PLAN_MAX_TOKENS",
+        validation_alias="LLM_REPO_PLAN_MAX_TOKENS",
     )
-    nemotron_stack_recommendation_max_tokens: int = Field(
+    llm_stack_recommendation_max_tokens: int = Field(
         default=4000,
         ge=1500,
-        validation_alias="NEMOTRON_STACK_RECOMMENDATION_MAX_TOKENS",
+        validation_alias="LLM_STACK_RECOMMENDATION_MAX_TOKENS",
     )
-    nemotron_file_manifest_max_tokens: int = Field(
+    llm_file_manifest_max_tokens: int = Field(
         default=3500,
         ge=1200,
-        validation_alias="NEMOTRON_FILE_MANIFEST_MAX_TOKENS",
+        validation_alias="LLM_FILE_MANIFEST_MAX_TOKENS",
     )
-    nemotron_file_manifest_max_retries: int = Field(
-        default=5,
+    llm_file_manifest_max_retries: int = Field(
+        default=3,
         ge=0,
-        validation_alias="NEMOTRON_FILE_MANIFEST_MAX_RETRIES",
+        validation_alias="LLM_FILE_MANIFEST_MAX_RETRIES",
+    )
+    llm_code_generation_max_tokens: int = Field(
+        default=8000,
+        ge=2000,
+        validation_alias="LLM_CODE_GENERATION_MAX_TOKENS",
+        description="Max output tokens per staged code-generation LLM call (DB, backend, frontend, docs).",
     )
     require_live_file_manifest: bool = Field(
         default=True,
         validation_alias="REQUIRE_LIVE_FILE_MANIFEST",
-    )
-    openclaw_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias="OPENCLAW_API_KEY",
-    )
-    openclaw_gateway_token: SecretStr | None = Field(
-        default=None,
-        validation_alias="OPENCLAW_GATEWAY_TOKEN",
-    )
-    openclaw_env: str | None = Field(
-        default=None,
-        validation_alias="OPENCLAW_ENV",
-    )
-    openclaw_base_url: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OPENCLAW_ENDPOINT", "OPENCLAW_BASE_URL"),
     )
     supabase_url: str | None = Field(
         default=None,
@@ -227,7 +237,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def apply_mock_mode_override(self) -> "Settings":
-        if self.mock_mode_override is not None:
+        if self.mock_mode_override is not None and "adapter_mode" not in self.model_fields_set:
             self.adapter_mode = "mock" if self.mock_mode_override else "live"
         return self
     cors_origins: list[str] = Field(
@@ -236,9 +246,9 @@ class Settings(BaseSettings):
     )
 
     @field_validator(
-        "nvidia_api_key",
-        "openclaw_api_key",
-        "openclaw_gateway_token",
+        "gemini_api_key",
+        "groq_api_key",
+        "openai_api_key",
         "supabase_service_role_key",
         "supabase_anon_key",
         "github_oauth_client_secret",
@@ -273,77 +283,128 @@ class Settings(BaseSettings):
         return self.adapter_mode == "mock"
 
     @property
-    def nvidia_configured(self) -> bool:
-        return self._secret_has_value(self.nvidia_api_key)
+    def llm_model_name(self) -> str:
+        if self.llm_model and self.llm_model.strip():
+            return self.llm_model.strip()
+        return {
+            "gemini": "gemini-2.5-flash",
+            "groq": "llama-3.1-8b-instant",
+            "openai": "gpt-4.1-mini",
+        }[self.llm_provider]
 
     @property
-    def nemotron_fast_fallback_active(self) -> bool:
-        return self.allow_idea_aware_partial and self.nemotron_fast_fallback
+    def llm_fallback_model_name(self) -> str | None:
+        if self.llm_fallback_model and self.llm_fallback_model.strip():
+            return self.llm_fallback_model.strip()
+        if self.llm_provider != "groq" and self._secret_has_value(self.groq_api_key):
+            return "llama-3.1-8b-instant"
+        return None
 
     @property
-    def nemotron_strict_live_active(self) -> bool:
+    def llm_configured(self) -> bool:
+        return self._secret_has_value(self.llm_api_key) or (
+            self.llm_provider != "groq" and self._secret_has_value(self.groq_api_key)
+        )
+
+    @property
+    def llm_api_key(self) -> SecretStr | None:
+        return {
+            "gemini": self.gemini_api_key,
+            "groq": self.groq_api_key,
+            "openai": self.openai_api_key,
+        }[self.llm_provider]
+
+    @property
+    def llm_base_url(self) -> str:
+        return {
+            "gemini": self.gemini_base_url,
+            "groq": self.groq_base_url,
+            "openai": self.openai_base_url,
+        }[self.llm_provider]
+
+    @property
+    def llm_missing_api_key_name(self) -> str:
+        return {
+            "gemini": "GEMINI_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }[self.llm_provider]
+
+    @property
+    def llm_fast_fallback_active(self) -> bool:
+        return self.allow_idea_aware_partial and self.llm_fast_fallback
+
+    @property
+    def llm_strict_live_active(self) -> bool:
         return not self.allow_idea_aware_partial
 
     @property
+    def strict_live_file_generation(self) -> bool:
+        """When true, staged file generation must stay on the live LLM path."""
+        return not self.mock_mode and self.llm_strict_live_active
+
+    @property
     def workflow_live_manifest_only(self) -> bool:
-        """Non-mock workflow runs commit only Nemotron live artifacts."""
+        """Non-mock workflow runs commit only live model artifacts."""
         return not self.mock_mode and self.require_live_file_manifest
 
-    def nemotron_read_timeout_seconds(self, purpose: str) -> float:
-        if self.nemotron_fast_fallback_active:
-            return self.nemotron_live_attempt_timeout_seconds
+    def llm_read_timeout_seconds(self, purpose: str) -> float:
+        if self.llm_fast_fallback_active:
+            return self.llm_live_attempt_timeout_seconds
         if purpose == "file_manifest":
-            return self.nemotron_file_manifest_timeout_seconds
+            return self.llm_file_manifest_timeout_seconds
         if purpose == "plan_repo":
-            return self.nemotron_repo_plan_timeout_seconds
-        if self.nemotron_strict_live_active:
-            return max(self.nemotron_strict_timeout_seconds, self.nemotron_timeout_seconds)
-        return self.nemotron_timeout_seconds
+            return self.llm_repo_plan_timeout_seconds
+        if self.llm_strict_live_active:
+            return max(self.llm_strict_timeout_seconds, self.llm_timeout_seconds)
+        return self.llm_timeout_seconds
 
     @property
-    def nemotron_effective_timeout_seconds(self) -> float:
-        return self.nemotron_read_timeout_seconds("scope_mvp")
+    def llm_effective_timeout_seconds(self) -> float:
+        return self.llm_read_timeout_seconds("scope_mvp")
 
     @property
-    def nemotron_effective_max_retries(self) -> int:
-        if self.nemotron_fast_fallback_active:
-            return self.nemotron_fast_fallback_max_retries
-        return self.nemotron_max_retries
+    def llm_effective_max_retries(self) -> int:
+        if self.llm_fast_fallback_active:
+            return self.llm_fast_fallback_max_retries
+        return self.llm_max_retries
 
-    def nemotron_max_tokens_for(self, purpose: str) -> int:
+    def llm_max_tokens_for(self, purpose: str) -> int:
         if purpose == "plan_repo":
-            return self.nemotron_repo_plan_max_tokens
+            return self.llm_repo_plan_max_tokens
         if purpose == "file_manifest":
-            return self.nemotron_file_manifest_max_tokens
+            return self.llm_file_manifest_max_tokens
         if purpose == "recommend_stack":
-            return self.nemotron_stack_recommendation_max_tokens
-        return self.nemotron_planning_max_tokens
+            return self.llm_stack_recommendation_max_tokens
+        if purpose in (
+            "generate_database",
+            "generate_backend",
+            "generate_frontend",
+            "generate_docs",
+            "generate_demo_video",
+        ):
+            return self.llm_code_generation_max_tokens
+        return self.llm_planning_max_tokens
 
-    def nemotron_max_retries_for(self, purpose: str) -> int:
+    def llm_max_retries_for(self, purpose: str) -> int:
         if purpose == "file_manifest":
-            return max(self.nemotron_effective_max_retries, self.nemotron_file_manifest_max_retries)
+            return max(self.llm_effective_max_retries, self.llm_file_manifest_max_retries)
         if purpose == "plan_repo":
-            return max(self.nemotron_effective_max_retries, self.nemotron_repo_plan_max_retries)
-        return self.nemotron_effective_max_retries
+            return max(self.llm_effective_max_retries, self.llm_repo_plan_max_retries)
+        return self.llm_effective_max_retries
 
-    def nemotron_poll_max_seconds_for(self, purpose: str) -> float:
-        if self.nemotron_fast_fallback_active:
-            return self.nemotron_fast_fallback_poll_max_seconds
+    def llm_poll_max_seconds_for(self, purpose: str) -> float:
+        if self.llm_fast_fallback_active:
+            return self.llm_fast_fallback_poll_max_seconds
         if purpose == "file_manifest":
-            return self.nemotron_file_manifest_poll_max_seconds
+            return self.llm_file_manifest_poll_max_seconds
         if purpose == "plan_repo":
-            return self.nemotron_repo_plan_poll_max_seconds
-        if self.nemotron_strict_live_active:
-            return self.nemotron_poll_max_seconds
-        return self.nemotron_poll_max_seconds
+            return self.llm_repo_plan_poll_max_seconds
+        return self.llm_poll_max_seconds
 
     @property
-    def nemotron_effective_poll_max_seconds(self) -> float:
-        return self.nemotron_poll_max_seconds_for("scope_mvp")
-
-    @property
-    def openclaw_configured(self) -> bool:
-        return self._secret_has_value(self.openclaw_api_key)
+    def llm_effective_poll_max_seconds(self) -> float:
+        return self.llm_poll_max_seconds_for("scope_mvp")
 
     @property
     def supabase_configured(self) -> bool:
@@ -386,7 +447,9 @@ class Settings(BaseSettings):
 
     @property
     def rag_live_ready(self) -> bool:
-        return self.nvidia_configured and self.supabase_configured
+        from agent.rag.env_status import is_rag_configured
+
+        return is_rag_configured()
 
     @staticmethod
     def _secret_has_value(secret: SecretStr | None) -> bool:
@@ -396,6 +459,6 @@ class Settings(BaseSettings):
 
     @property
     def health_status(self) -> Literal["ok", "degraded"]:
-        if self.adapter_mode == "live" and not self.nvidia_configured:
+        if self.adapter_mode == "live" and not self.llm_configured:
             return "degraded"
         return "ok"

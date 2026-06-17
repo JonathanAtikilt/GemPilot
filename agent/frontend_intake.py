@@ -60,7 +60,7 @@ class FrontendIntake(BaseModel):
     requiredFeatures: list[str] = Field(default_factory=list)
     projectDepth: str = "Advanced Project"
     targetPlatform: str = "web app"
-    useOpenClawOrchestration: bool = True
+    useRuntimeOrchestration: bool = True
 
     @field_validator(
         "title",
@@ -145,7 +145,7 @@ def build_frontend_intake_from_request(request: RunAgentRequest) -> FrontendInta
         requiredFeatures=list(request.required_features),
         projectDepth=request.project_depth,
         targetPlatform=request.target_platform,
-        useOpenClawOrchestration=request.use_openclaw_orchestration,
+        useRuntimeOrchestration=request.use_runtime_orchestration,
     )
 
 
@@ -184,8 +184,6 @@ def build_optional_params_from_frontend_intake(
         optional_params["techStackPreference"] = intake.techStackPreference
     if intake.requiredFeatures:
         optional_params["requiredFeatures"] = intake.requiredFeatures
-    if intake.githubConnected:
-        optional_params["repoPreference"] = "GitHub-connected repository handoff"
     optional_params["repoPreference"] = intake.repoPreference
     optional_params["repoName"] = intake.repoName
     optional_params["repoDescription"] = intake.repoDescription
@@ -252,7 +250,7 @@ async def fetch_submitted_url(url: str) -> FetchedUrl:
             timeout=httpx.Timeout(URL_FETCH_TIMEOUT_SECONDS),
             follow_redirects=True,
         ) as client:
-            response = await client.get(url, headers={"User-Agent": "MVPilot/0.1"})
+            response = await client.get(url, headers={"User-Agent": "GemPilot/1.0"})
     except httpx.TimeoutException as exc:
         raise SourceFetchError(url, "request timed out") from exc
     except httpx.HTTPError as exc:

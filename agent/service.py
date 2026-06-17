@@ -67,27 +67,24 @@ class AgentService:
             ],
         )
         
-        from agent.live_adapters import LiveRagMemoryAdapter
-
-        rag = LiveRagMemoryAdapter()
         if self._settings.mock_mode:
-            from agent.adapters import InMemoryAuditAdapter, InMemoryToolAdapter
+            from agent.adapters import InMemoryAuditAdapter, InMemoryRagMemoryAdapter, InMemoryToolAdapter
 
+            rag = InMemoryRagMemoryAdapter()
             tools = InMemoryToolAdapter()
-            audit = InMemoryAuditAdapter(model_name=self._settings.nemotron_fast_model)
+            audit = InMemoryAuditAdapter(model_name=self._settings.llm_model_name)
         else:
+            from agent.live_adapters import LiveRagMemoryAdapter
             from agent.live_adapters import LiveAuditAdapter, LiveToolAdapter
 
+            rag = LiveRagMemoryAdapter()
             tools = LiveToolAdapter()
-            audit = LiveAuditAdapter(model_name=self._settings.nemotron_fast_model)
+            audit = LiveAuditAdapter(model_name=self._settings.llm_model_name)
 
-        if self._settings.openclaw_configured:
-            from agent.openclaw_runtime import OpenClawToolAdapter
-
-            tools = OpenClawToolAdapter(
-                tools,
-                environment=self._settings.openclaw_env,
-            )
+        async def on_progress(steps: list[Any]) -> None:
+            append_steps = getattr(self._task_store, "append_agent_steps", None)
+            if append_steps is not None:
+                await append_steps(task_id, steps)
 
         workflow = build_workflow(
             self._settings,
@@ -95,6 +92,7 @@ class AgentService:
             retrieval=rag,
             audit=audit,
             github_connections=self._github_connections,
+            progress_callback=on_progress,
         )
 
         try:
@@ -134,7 +132,7 @@ class AgentService:
             node_name="failed",
             status="failed",
             message=message,
-            model=self._settings.nemotron_fast_model,
+            model=self._settings.llm_model_name,
             decision_trace=[
                 "Unhandled exception stopped the LangGraph workflow.",
                 f"{exc.__class__.__name__}: {detail_message}",
@@ -150,7 +148,7 @@ class AgentService:
             "tool_calls": detail.tool_calls,
             "runtime": detail.runtime,
             "registered_tools": detail.registered_tools,
-            "openclaw_trace": detail.openclaw_trace,
+            "runtime_trace": detail.runtime_trace,
             "generated_artifacts": detail.generated_artifacts,
             "graph_trace": [*detail.graph_trace, step],
             "mvp_plan": detail.mvp_plan,
@@ -158,7 +156,7 @@ class AgentService:
             "final_report": {
                 "status": "failed",
                 "mode": "mock" if self._settings.mock_mode else "live",
-                "model": self._settings.nemotron_fast_model,
+                "model": self._settings.llm_model_name,
                 "summary": message,
             },
         }

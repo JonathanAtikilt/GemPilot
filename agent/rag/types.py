@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 
 DocType = Literal[
     "hackathon_rules",
-    "nvidia_docs",
-    "nvidia_model_docs",
+    "ai_provider_docs",
+    "llm_model_docs",
     "team_notes",
     "build_log",
     "generated_project_doc",
@@ -19,7 +19,7 @@ DocType = Literal[
     "agent_boundaries",
     "security_constraints",
     "implementation_constraints",
-    "nvidia_model_usage",
+    "llm_model_usage",
     "unknown",
 ]
 

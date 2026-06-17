@@ -6,7 +6,7 @@ from agent.workflow import build_initial_state, build_workflow
 
 
 @pytest.mark.asyncio
-async def test_retrieve_context_node_populates_build_context_for_nemotron(mock_live_rag_search) -> None:
+async def test_retrieve_context_node_populates_build_context_for_gemini(mock_live_rag_search) -> None:
     settings = Settings(_env_file=None, adapter_mode="mock")
     workflow = build_workflow(settings, retrieval=LiveRagMemoryAdapter())
     state = build_initial_state(

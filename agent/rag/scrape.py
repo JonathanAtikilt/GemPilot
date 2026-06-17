@@ -13,7 +13,7 @@ from agent.rag.types import SourceDocument
 
 MAX_FIRST_LEVEL_LINKS = 50
 SCRAPE_TIMEOUT_SECONDS = 30.0
-USER_AGENT = "MVPilot-RAG/1.0"
+USER_AGENT = "GemPilot-RAG/1.0"
 MIN_PAGE_TEXT_CHARS = 80
 SKIP_EXTENSIONS = {
     ".pdf",

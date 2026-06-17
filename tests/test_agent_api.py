@@ -84,7 +84,7 @@ def test_run_agent_accepts_current_frontend_multipart_payload(
             "primary_rules_url": "https://example.com/rules",
             "additional_urls": [
                 "https://example.com/judging",
-                "https://developer.nvidia.com/nemotron",
+                "https://developer.google-ai.com/gemini",
             ],
             "github_connection_id": "conn_ready_123",
             "github_connected": "true",
@@ -109,7 +109,7 @@ def test_run_agent_accepts_current_frontend_multipart_payload(
     assert task["primary_rules_url"] == "https://example.com/rules"
     assert task["additional_urls"] == [
         "https://example.com/judging",
-        "https://developer.nvidia.com/nemotron",
+        "https://developer.google-ai.com/gemini",
     ]
     assert task["additional_files"] == [
         {
@@ -209,10 +209,10 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     assert response.status_code == 200
     data = response.json()
     assert set(data) == {
-        "task",
-        "runtime",
-        "registered_tools",
-        "openclaw_trace",
+            "task",
+            "runtime",
+            "registered_tools",
+            "runtime_trace",
         "agent_steps",
         "retrieved_docs",
         "build_context",
@@ -230,7 +230,7 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
     assert data["build_context"]["requiredDeliverables"]
     assert data["runtime"] == "langgraph"
     assert data["registered_tools"] == []
-    assert data["openclaw_trace"] == []
+    assert data["runtime_trace"] == []
     assert data["task"]["id"] == task_id
     assert data["task"]["idea"] == VALID_IDEA
     assert data["task"]["repo_visibility"] == "public"
@@ -295,14 +295,29 @@ def test_task_detail_returns_populated_workflow_dashboard(client, mock_live_rag_
         "scope_mvp",
         "recommend_stack",
         "plan_repo",
-        "file_manifest",
         "blocker_analysis",
         "final_package",
     }
     assert all(
         step["model_mode"] in {"mock", "partial", "degraded"} for step in model_steps
     )
-    assert "fake-nvidia-key" not in response.text
+    assert "fake-google-ai-key" not in response.text
+
+
+def test_orchestrator_start_project_alias_matches_agent_run(client):
+    response = client.post(
+        "/api/orchestrator/start-project",
+        json={
+            "idea": VALID_IDEA,
+            "repo_visibility": "public",
+            "demo_mode": True,
+        },
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    UUID(data["task_id"])
+    assert data["status"] == "started"
 
 
 def test_task_detail_returns_404_for_missing_tasks(client):
@@ -312,13 +327,11 @@ def test_task_detail_returns_404_for_missing_tasks(client):
     assert response.json()["detail"] == "Task not found"
 
 
-def test_task_detail_surfaces_openclaw_runtime_trace(mock_live_rag_search):
+def test_task_detail_has_langgraph_runtime_without_external_runtime_tools(mock_live_rag_search):
     app = create_app(
         settings=Settings(
             _env_file=None,
             adapter_mode="mock",
-            openclaw_api_key="fake-openclaw-key",
-            openclaw_env="development",
         )
     )
 
@@ -328,16 +341,10 @@ def test_task_detail_surfaces_openclaw_runtime_trace(mock_live_rag_search):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["runtime"] == "openclaw"
-    assert "github.create_repo" in data["registered_tools"]
-    assert [entry["tool"] for entry in data["openclaw_trace"]] == [
-        "github.create_repo",
-        "github.commit_files",
-        "build.verify",
-        "build.apply_recovery_patch",
-        "build.verify",
-    ]
-    assert all(tool_call["runtime"] == "openclaw" for tool_call in data["tool_calls"])
+    assert data["runtime"] == "langgraph"
+    assert data["registered_tools"] == []
+    assert data["runtime_trace"] == []
+    assert data["tool_calls"]
 
 
 def test_approve_rejects_invalid_decisions(client):

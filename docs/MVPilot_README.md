@@ -1,24 +1,24 @@
-# MVPilot: Agentic MVP Builder
+# GemPilot: Full-Stack Hackathon Project Generator
 
 ## Project Overview
 
-**MVPilot** is an autonomous hackathon creator powered by **Nemotron, OpenClaw, NemoClaw, GitHub, and RAG**.
+**GemPilot** is an autonomous hackathon project generator powered by **Gemini, LangGraph, NemoClaw, GitHub, and RAG**.
 
-Given only a messy hackathon project idea, MVPilot creates a new GitHub repository, scopes the idea into a realistic MVP, generates the codebase, commits progress step by step, logs every build action, fixes blockers, and produces the final README, demo script, and pitch.
+Given only a messy hackathon project idea, GemPilot creates or updates a GitHub repository, expands the idea into a complete full-stack project, generates the frontend app, backend API, database schema/models, seed data, tests, docs, deployment instructions, and project-specific demo video materials, then commits the package and reports validation evidence.
 
-Instead of only helping teams plan what to build, MVPilot helps them build it from scratch.
+Instead of only helping teams plan what to build, GemPilot builds a polished, demo-ready repository that can be presented as a hackathon submission.
 
 ---
 
 ## Final Pitch
 
-> **We built MVPilot, an AI hackathon teammate that turns a messy project idea into a working MVP from scratch. It creates the GitHub repo, scopes the MVP using RAG over hackathon and NVIDIA docs, writes the codebase, commits every step, logs its build process, fixes blockers, and generates the final demo pitch.**
+> **We built GemPilot, an AI hackathon teammate that turns a messy project idea into a complete full-stack submission from scratch. It creates the GitHub repo, expands requirements using RAG over hackathon and Google AI docs, writes the frontend, backend, database, tests, docs, seed data, and demo materials, commits the package, logs its build process, validates the output, and generates the final pitch.**
 
 ---
 
 ## One-Line Demo Summary
 
-> **We gave MVPilot only a messy project idea. It created the GitHub repo, scoped the MVP, generated the codebase, committed each step, logged its build process, fixed blockers, and produced the final pitch.**
+> **We gave GemPilot only a messy project idea. It created the GitHub repo, generated a complete full-stack codebase, committed the package, logged its build process, validated the repository, and produced README, demo video materials, deployment instructions, and a hackathon submission summary.**
 
 ---
 
@@ -27,35 +27,35 @@ Instead of only helping teams plan what to build, MVPilot helps them build it fr
 Hackathon teams often lose valuable time on:
 
 - Deciding what to build
-- Creating boilerplate project structure
+- Creating a complete project structure
 - Reading setup documentation
-- Splitting a broad idea into realistic MVP features
+- Turning a broad idea into real product-specific features
 - Tracking progress
 - Debugging blockers
-- Preparing the final demo and pitch
+- Preparing the final demo video, README, deployment notes, and pitch
 
 Most AI tools help with only one piece of this process.
 
-**MVPilot handles the full project lifecycle from idea to MVP.**
+**GemPilot handles the full project lifecycle from idea to hackathon-ready full-stack project.**
 
 ---
 
 ## Solution
 
-MVPilot acts like an autonomous hackathon teammate.
+GemPilot acts like an autonomous hackathon teammate.
 
 It can:
 
 1. Take a messy project idea
 2. Create a GitHub repository
-3. Read hackathon and NVIDIA documentation using RAG
-4. Scope the idea into a realistic MVP
-5. Generate the project structure and source code
+3. Read hackathon and Google AI documentation using RAG
+4. Expand the idea into a complete full-stack project plan
+5. Generate frontend, backend, database, auth, seed data, tests, docs, and demo materials
 6. Commit each major step to GitHub
 7. Maintain a build log and audit trail
 8. Detect errors and blockers
 9. Fix issues or recommend fixes
-10. Generate the final README, demo script, and pitch
+10. Generate the final README, API docs, deployment guide, demo video package, hackathon summary, and pitch
 
 ---
 
@@ -143,7 +143,7 @@ demo/
 
 ---
 
-### Step 3: MVPilot retrieves hackathon and NVIDIA docs with RAG
+### Step 3: MVPilot retrieves hackathon and Google AI docs with RAG
 
 The RAG agent retrieves relevant information from:
 
@@ -151,8 +151,8 @@ The RAG agent retrieves relevant information from:
 Hackathon rules
 Judging criteria
 NemoClaw setup docs
-OpenClaw docs
-Nemotron model docs
+LangGraph docs
+Gemini model docs
 GitHub project requirements
 Team notes
 ```
@@ -247,16 +247,16 @@ Updated frontend fetch call and committed fix.
 
 ---
 
-### Step 9: MVPilot generates the final demo package
+### Step 9: GemPilot generates the final demo package
 
 Final outputs:
 
 ```text
-Working MVP repo
+Working full-stack project repo
 README
 Architecture summary
 Build log
-Demo script
+Demo video materials
 30-second pitch
 Known limitations
 Next steps
@@ -269,7 +269,7 @@ Next steps
 ```text
 User
  ↓
-MVPilot Orchestrator Agent
+GemPilot Orchestrator Agent
  ↓
 ────────────────────────────────────
 GitHub Repo Creation Agent
@@ -280,12 +280,12 @@ GitHub Repo Creation Agent
 
 RAG + Docs Agent
 - retrieves hackathon rules
-- retrieves NVIDIA docs
+- retrieves Google AI docs
 - indexes generated project docs
 - provides evidence for build decisions
 
-Nemotron Orchestrator Agent
-- scopes MVP
+Gemini Orchestrator Agent
+- expands full-stack project requirements
 - decides what to build next
 - calls tools
 - coordinates sub-agents
@@ -296,11 +296,11 @@ Frontend + Demo Agent
 - builds user interface
 - shows build progress
 - displays logs
-- generates final demo script
+- generates final demo video materials
 - generates final pitch
 ────────────────────────────────────
  ↓
-GitHub Repo + Working MVP + Build Log + Final Pitch
+GitHub Repo + Complete Full-Stack Project + Build Log + Demo Package + Final Pitch
 ```
 
 ---
@@ -309,10 +309,10 @@ GitHub Repo + Working MVP + Build Log + Final Pitch
 
 | Member | Role | Main Responsibility | Recommended Models |
 |---|---|---|---|
-| Person 1 | GitHub Repo Creation Agent | Create the repo, initialize files, commit changes, manage branches, and write the build log | `llama-3.1-nemotron-nano-8b-v1` |
-| Person 2 | RAG + Docs Agent | Index hackathon docs, NVIDIA docs, generated project docs, logs, and retrieve requirements | `nv-embedqa-e5-v5`, `llama-nemotron-rerank-1b-v2` |
-| Person 3 | Nemotron Orchestrator Agent | Decide what to build, call tools, coordinate agents, detect blockers, and fix issues | `llama-3.3-nemotron-super-49b-v1.5` |
-| Person 4 | Frontend + Demo Agent | Build the dashboard showing idea input, repo creation, build progress, commits, logs, and final pitch | `llama-3.1-nemotron-nano-8b-v1` |
+| Person 1 | GitHub Repo Creation Agent | Create the repo, initialize files, commit changes, manage branches, and write the build log | `llama-3.1-gemini-nano-8b-v1` |
+| Person 2 | RAG + Docs Agent | Index hackathon docs, Google AI docs, generated project docs, logs, and retrieve requirements | `nv-embedqa-e5-v5`, `cosine similarity ranking` |
+| Person 3 | Gemini Orchestrator Agent | Decide what to build, call tools, coordinate agents, detect blockers, and fix issues | `llama-3.3-gemini-super-49b-v1.5` |
+| Person 4 | Frontend + Demo Agent | Build the dashboard showing idea input, repo creation, build progress, commits, logs, and final pitch | `llama-3.1-gemini-nano-8b-v1` |
 
 ---
 
@@ -321,7 +321,7 @@ GitHub Repo + Working MVP + Build Log + Final Pitch
 ### Main Reasoning / Planning
 
 ```text
-llama-3.3-nemotron-super-49b-v1.5
+llama-3.3-gemini-super-49b-v1.5
 ```
 
 Used for:
@@ -340,7 +340,7 @@ Final pitch generation
 ### Lightweight Summarization / Helper Agents
 
 ```text
-llama-3.1-nemotron-nano-8b-v1
+llama-3.1-gemini-nano-8b-v1
 ```
 
 Used for:
@@ -365,7 +365,7 @@ Used for:
 
 ```text
 Embedding hackathon docs
-Embedding NVIDIA docs
+Embedding Google AI docs
 Embedding generated project docs
 Embedding logs and README files
 ```
@@ -375,7 +375,7 @@ Embedding logs and README files
 ### RAG Reranking
 
 ```text
-llama-nemotron-rerank-1b-v2
+cosine similarity ranking
 ```
 
 Used for:
@@ -408,7 +408,7 @@ The hackathon MVP should include:
 
 1. User enters a messy project idea.
 2. MVPilot creates a new GitHub repo.
-3. MVPilot reads hackathon and NVIDIA docs with RAG.
+3. MVPilot reads hackathon and Google AI docs with RAG.
 4. MVPilot scopes the project into a realistic MVP.
 5. MVPilot generates the project structure and source code.
 6. MVPilot commits each major step.
@@ -436,15 +436,15 @@ The hackathon MVP should include:
 
 ---
 
-## Why This Uses Nemotron Well
+## Why This Uses Gemini Well
 
-| Nemotron Strength | How MVPilot Uses It |
+| Gemini Strength | How MVPilot Uses It |
 |---|---|
 | Advanced reasoning | Converts a messy idea into a realistic MVP |
 | Multi-step problem solving | Plans, builds, commits, debugs, and pitches |
 | Function calling | Creates repos, writes files, commits code, logs steps |
 | Autonomous decision-making | Chooses what to build next and when to cut scope |
-| RAG | Retrieves hackathon rules, NVIDIA docs, and project requirements |
+| RAG | Retrieves hackathon rules, Google AI docs, and project requirements |
 | Multi-agent orchestration | Coordinates repo, RAG, planning, coding, logging, and demo agents |
 
 ---

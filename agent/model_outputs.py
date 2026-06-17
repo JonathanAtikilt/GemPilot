@@ -76,6 +76,8 @@ class ArchitecturePlanOutput(TracedModelOutput):
     test_plan: list[str] = Field(min_length=1)
     deployment_plan: list[str] = Field(default_factory=list)
     documentation_plan: list[str] = Field(default_factory=list)
+    demo_video_plan: list[str] = Field(default_factory=list)
+    hackathon_submission_plan: list[str] = Field(default_factory=list)
     mode: ModelOutputMode
 
 
@@ -84,6 +86,23 @@ class GeneratedArtifactOutput(BaseModel):
     kind: str
     summary: str
     content: str | None = None
+
+
+class GeneratedFileWithContent(BaseModel):
+    """A generated source file with mandatory content — used by the staged code generator."""
+
+    name: str
+    kind: str = "code"
+    summary: str = ""
+    content: str = ""
+
+
+class GeneratedFileBatchOutput(TracedModelOutput):
+    """Output of a single code-generation stage (database, backend, frontend, or docs)."""
+
+    stage: str = ""
+    files: list[GeneratedFileWithContent] = Field(default_factory=list)
+    mode: ModelOutputMode
 
 
 class FileManifestOutput(TracedModelOutput):
@@ -129,10 +148,3 @@ class PitchOutput(TracedModelOutput):
     tagline: str
     content: str
     proof_points: list[str] = Field(min_length=1)
-
-
-# Compatibility aliases for older imports while active code uses project language.
-DemoPathStep = UserFlowStep
-MvpScopeOutput = ProjectRequirementsOutput
-RepoPlanOutput = ArchitecturePlanOutput
-DemoScriptOutput = WalkthroughOutput

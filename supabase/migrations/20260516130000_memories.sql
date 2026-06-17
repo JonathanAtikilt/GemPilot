@@ -6,7 +6,7 @@ create table public.memories (
   summary text not null,
   outcome jsonb default '{}'::jsonb,
   tags text[] default '{}'::text[],
-  embedding extensions.vector(2048),
+  embedding extensions.vector(768),
   created_at timestamptz default now()
 );
 
@@ -16,11 +16,11 @@ alter table public.memories enable row level security;
 -- Add indexes
 create index memories_task_id_idx on public.memories (task_id);
 create index memories_created_at_idx on public.memories (created_at desc);
--- No index for embeddings since it exceeds 2000 dimensions (2048)
+-- Embedding index can be added later once the demo corpus grows.
 
 -- Match memories RPC
 create or replace function public.match_memories(
-  query_embedding extensions.vector(2048),
+  query_embedding extensions.vector(768),
   match_count int default 5
 )
 returns table (
@@ -49,6 +49,7 @@ begin
     1 - (m.embedding <=> query_embedding) as score,
     m.created_at
   from public.memories m
+  where m.embedding is not null
   order by m.embedding <=> query_embedding
   limit match_count;
 end;

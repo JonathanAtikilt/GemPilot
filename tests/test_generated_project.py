@@ -22,12 +22,15 @@ def test_build_project_artifacts_includes_runnable_stack() -> None:
     assert "src/App.jsx" in names or "frontend/src/App.jsx" in names
     assert "backend/main.py" in names
     assert "docs/BUILD_LOG.md" in names
-    assert "docs/WALKTHROUGH.md" in names or "demo/demo_script.md" in names
+    assert "docs/WALKTHROUGH.md" in names
+    assert {"demo/script.md", "demo/storyboard.md", "demo/demo_walkthrough.md", "demo/video_outline.md"} <= names
+    assert "docs/HACKATHON_SUBMISSION.md" in names
+    assert "data/seed.json" in names
 
 
-def test_hydrate_file_manifest_fills_scaffold_from_nemotron_outline() -> None:
+def test_hydrate_file_manifest_fills_scaffold_from_gemini_outline() -> None:
     artifacts = hydrate_file_manifest(
-        [{"name": "README.md", "kind": "markdown", "summary": "Nemotron overview."}],
+        [{"name": "README.md", "kind": "markdown", "summary": "Gemini overview."}],
         idea="Build StudyPilot for college students.",
         title="StudyPilot",
         resolved_stack="React, FastAPI",
@@ -35,13 +38,13 @@ def test_hydrate_file_manifest_fills_scaffold_from_nemotron_outline() -> None:
     )
     readme = next(item for item in artifacts if item["name"] == "README.md")
     assert readme["content"]
-    assert readme["summary"] == "Nemotron overview."
+    assert readme["summary"] == "Gemini overview."
     assert "StudyPilot" in readme["content"]
     assert any(item["name"] == "backend/main.py" for item in artifacts)
 
     package_json = next(artifact for artifact in artifacts if artifact["name"] == "package.json")
-    assert '"vite": "^6.0.0"' in package_json["content"]
-    assert '"@vitejs/plugin-react": "^4.3.4"' in package_json["content"]
+    assert '"vite": "^8.0.0"' in package_json["content"]
+    assert '"@vitejs/plugin-react": "^6.0.0"' in package_json["content"]
 
 
 def test_merge_with_project_artifacts_keeps_model_files() -> None:

@@ -4,8 +4,8 @@ from agent.rag.types import DocType
 DOC_TYPE_AUTHORITY: dict[DocType, float] = {
     "hackathon_rules": 1.0,
     "required_deliverables": 0.98,
-    "nvidia_docs": 0.95,
-    "nvidia_model_docs": 0.95,
+    "ai_provider_docs": 0.95,
+    "llm_model_docs": 0.95,
     "allowed_tools_apis": 0.93,
     "repository_format": 0.9,
     "demo_format": 0.9,

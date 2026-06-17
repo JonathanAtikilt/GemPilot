@@ -56,3 +56,19 @@ async def test_write_memory():
 
         mock_client.table.assert_called_once_with("memories")
         mock_client.table.return_value.insert.assert_called_once_with([memory])
+
+
+def test_get_rag_store_reuses_singleton() -> None:
+    with patch("agent.rag.store.get_supabase_url", return_value="http://localhost"), \
+         patch("agent.rag.store.get_supabase_service_role_key", return_value="key"), \
+         patch("supabase.create_client") as mock_create_client:
+        mock_create_client.return_value = MagicMock()
+
+        from agent.rag.store import get_rag_store, reset_rag_store
+
+        reset_rag_store()
+        first = get_rag_store()
+        second = get_rag_store()
+
+        assert first is second
+        mock_create_client.assert_called_once()

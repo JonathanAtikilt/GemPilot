@@ -1,39 +1,29 @@
-# MVPilot RAG Service
+# NemoPilot RAG Service
 
-This FastAPI RAG service indexes local markdown/text evidence for the Orchestrator, frontend, and GitHub/build-log agents.
-
-## Install
-
-```bash
-python -m pip install -r requirements.txt
-```
+The FastAPI RAG service indexes local markdown/text evidence for the Orchestrator, Frontend UI Agent, GitHub Agent, and build-log memory.
 
 ## Environment
 
-Create `.env` from `.env.example` (or `.env.openclaw.example` on an OpenClaw/Brev backend).
+Create `.env` from the root `.env.example`.
 
-**Required for live RAG** (ingest, search, orchestrator `retrieve_context`):
-
-| Variable | Purpose |
-|----------|---------|
-| `NVIDIA_API_KEY` | Embeddings + reranking |
-| `SUPABASE_URL` | pgvector project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Backend writes to `rag_chunks` / `memories` |
-
-**Optional:**
+Required for live RAG:
 
 | Variable | Purpose |
 |----------|---------|
-| `NVIDIA_EMBED_MODEL` | Default `llama-nemotron-embed-1b-v2` |
-| `NVIDIA_RERANK_MODEL` | Default `llama-nemotron-rerank-1b-v2` |
+| `GEMINI_API_KEY` or `OPENAI_API_KEY` | Embeddings for ingest, search, and memory writes |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend writes to `rag_chunks` and `memories` |
+
+Optional:
+
+| Variable | Purpose |
+|----------|---------|
+| `EMBEDDING_PROVIDER` | `gemini` or `openai`; default `gemini` |
+| `EMBEDDING_MODEL` | Default `gemini-embedding-001`; use `text-embedding-3-small` for OpenAI |
+| `EMBEDDING_DIMENSIONS` | Default `768`; must match Supabase vector columns |
 | `RAG_SCRAPE_URLS` | Comma-separated seed URLs at ingest |
-| `NVIDIA_EMBEDDING_URL` / `NVIDIA_RERANK_URL` | Override NIM endpoints |
-
-**OpenClaw deployment:** set the same RAG variables on the OpenClaw host together with `OPENCLAW_API_KEY` and `OPENCLAW_ENV`. Check readiness with `GET /health` — `rag_configured` should be `true` before demoing ingest.
 
 `SUPABASE_SERVICE_ROLE_KEY` is backend-only. Do not expose it through frontend variables.
-
-If required vars are missing, RAG routes and live memory writes return a configuration error.
 
 ## Run
 
@@ -41,25 +31,15 @@ If required vars are missing, RAG routes and live memory writes return a configu
 uvicorn agent.main:app --reload --port 3001
 ```
 
-The server listens on `http://localhost:3001` with this command. Change `--port` if another service is using `3001`.
-
 ## Ingest
 
 ```bash
 curl -X POST http://localhost:3001/rag/ingest
 ```
 
-The ingester reads `.md` and `.txt` files from:
+The ingester reads `.md` and `.txt` files from `rag/sources/` and `logs/`. It also scrapes configured URLs from intake, `.env`, and `rag/scrape_urls.txt`.
 
-- `rag/sources/`
-- `logs/`
-
-It also scrapes web pages (seed URL plus **first-level, same-domain links only**) from:
-
-- **Orchestrator intake** — `rulesUrl` / `referenceUrls` on `POST /api/orchestrator/start-project` are scraped in `retrieve_context` before search (preferred for per-task rules). Backward-compatible `primary_rules_url` / `additional_urls` are still accepted.
-- **Static config** — `RAG_SCRAPE_URLS` in `.env` and/or `rag/scrape_urls.txt` (used by `POST /rag/ingest`).
-
-It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dimensions, and stores them in Supabase.
+It chunks documents, embeds chunks with the configured embedding provider, stores 768-dimensional vectors in Supabase by default, and records source metadata for citations.
 
 ## Search
 
@@ -67,23 +47,19 @@ It chunks documents, embeds chunks with `llama-nemotron-embed-1b-v2` at 2048 dim
 curl -X POST http://localhost:3001/rag/search \
   -H 'Content-Type: application/json' \
   -d '{
-    "query": "What should MVPilot build first based on hackathon rules?",
+    "query": "What should NemoPilot build first based on project rules?",
     "topK": 5,
-    "docTypes": ["hackathon_rules", "nvidia_docs", "build_log"]
+    "docTypes": ["hackathon_rules", "build_log"]
   }'
 ```
 
-Search embeds the query in query mode, retrieves similar chunks, and reranks candidates with `llama-nemotron-rerank-1b-v2` when available.
+Search embeds the query, retrieves similar chunks from pgvector, and ranks by cosine similarity weighted by source authority. External reranking is intentionally disabled for now; `agent/rag/rerank.py` is a local abstraction point for a future cross-encoder.
 
-## Orchestrator integration
+## Orchestrator Integration
 
-The Nemotron workflow always uses live RAG via `LiveRagMemoryAdapter` in the `retrieve_context` node. Results are stored on task state as `build_context` and passed into Nemotron prompts for `scope_mvp` and `plan_repo`.
+The workflow always uses RAG through `LiveRagMemoryAdapter` in the `retrieve_context` node. Results are stored on task state as `build_context` and passed into structured LLM prompts for `scope_mvp`, `recommend_stack`, and `plan_repo`.
 
-- Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `NVIDIA_API_KEY`
-- Run `POST /rag/ingest` before agent tasks so indexed chunks exist
-- Missing Supabase or NVIDIA configuration returns a clear backend configuration error. If retrieval runs but returns weak or empty evidence, `/rag/get-build-context` fills safe MVPilot fallback categories and marks them as default assumptions.
-
-Direct helper (also used by `POST /rag/get-build-context`):
+Direct helper:
 
 ```python
 from agent.rag import get_build_context
@@ -95,18 +71,17 @@ context = await get_build_context(
 )
 ```
 
-## Agent Endpoints
+## Endpoints
 
-- `POST /rag/get-build-context`: Orchestrator calls this before planning. Returns structured deliverables, tools, repo/demo format, tech stack, scope warnings, and evidence.
-- `POST /rag/answer-context`: Backward-compatible evidence endpoint. Prefer `/rag/get-build-context` for orchestrator planning.
-- `POST /rag/reindex-logs`: GitHub/build-log agent calls this after new commits, build output, or errors.
-- `GET /rag/sources`: Frontend calls this to show indexed sources and chunk counts.
-- `POST /rag/search`: Frontend and agents call this to show evidence for user questions.
+- `POST /rag/ingest`
+- `POST /rag/search`
+- `POST /rag/answer-context`
+- `POST /rag/get-build-context`
+- `POST /rag/reindex-logs`
+- `GET /rag/sources`
 
 ## Supabase
 
-Apply the migrations in `supabase/migrations/` to create `rag_chunks` and `match_rag_chunks`.
+Apply the migrations in `supabase/migrations/` to create `rag_chunks`, `memories`, and the pgvector RPC functions.
 
-Each chunk stores an `authority_score` (0–1) by source type: hackathon rules (1.0) > NVIDIA docs (0.95) > project/architecture docs (0.85) > build logs (0.75) > team notes (0.5). Search ranks by vector similarity multiplied by authority, and reranking applies the same boost.
-
-The table has RLS enabled and no anonymous write policy. For backend inserts, set `SUPABASE_SERVICE_ROLE_KEY` in the server environment only.
+Each chunk stores an `authority_score` by source type: hackathon rules and required deliverables rank above generated docs, build logs, and team notes. Search returns source, title, doc type, text, similarity, and weighted score for citations.
