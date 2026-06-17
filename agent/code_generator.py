@@ -55,6 +55,158 @@ _FRONTEND_STAGE_HINTS = frozenset(
     }
 )
 _DATABASE_STAGE_HINTS = frozenset({"database"})
+_CODE_GEN_PURPOSES = frozenset(
+    {
+        "generate_database",
+        "generate_backend",
+        "generate_frontend",
+        "generate_docs",
+        "generate_demo_video",
+    }
+)
+
+_STAGE_EXACT_PATHS: dict[str, frozenset[str]] = {
+    "generate_database": frozenset(
+        {
+            "backend/db.py",
+            "backend/models.py",
+            "docs/DATABASE_SCHEMA.sql",
+            "scripts/seed_data.py",
+            "data/seed.json",
+        }
+    ),
+    "generate_backend": frozenset(
+        {
+            "backend/main.py",
+            "backend/services.py",
+            "backend/__init__.py",
+            "requirements.txt",
+            "tests/test_backend.py",
+            "tests/test_api.py",
+            "docs/API_SPEC.md",
+        }
+    ),
+    "generate_frontend": frozenset(
+        {
+            "package.json",
+            "index.html",
+            "App.tsx",
+            "index.js",
+            "src/main.jsx",
+            "src/App.jsx",
+            "src/lib/api.js",
+            "src/state/projectState.js",
+            "src/styles.css",
+            "frontend/index.html",
+            "frontend/src/main.js",
+            "frontend/src/styles.css",
+        }
+    ),
+    "generate_docs": frozenset(
+        {
+            "README.md",
+            "docs/PROJECT_PLAN.md",
+            "docs/ARCHITECTURE.md",
+            "docs/TESTING_STRATEGY.md",
+            "docs/DEPLOY.md",
+            "docs/AGENT_LOG.md",
+            "docs/BUILD_LOG.md",
+            "docs/KNOWN_LIMITATIONS.md",
+            "docs/WALKTHROUGH.md",
+            ".env.example",
+        }
+    ),
+    "generate_demo_video": frozenset(
+        {
+            "demo/script.md",
+            "demo/storyboard.md",
+            "demo/demo_walkthrough.md",
+            "demo/video_outline.md",
+            "demo/voiceover.md",
+            "demo/demo_script.md",
+            "docs/HACKATHON_SUBMISSION.md",
+        }
+    ),
+}
+
+
+def project_generator_stage_batch(
+    *,
+    purpose: str,
+    idea: str,
+    title: str | None,
+    resolved_stack: str,
+    architecture_plan: dict[str, Any] | None = None,
+    source_warnings: list[dict[str, str]] | None = None,
+    target_users: str | None = None,
+    required_features: list[str] | None = None,
+    tech_stack_preference: str | None = None,
+    project_requirements: dict[str, Any] | None = None,
+    target_platform: str | None = None,
+    is_hackathon_mode: bool = False,
+    mode: str = "degraded",
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Return a stage file batch from the classification-driven project generator."""
+    from agent.generated_project import build_project_artifacts
+    from agent.model_outputs import GeneratedFileBatchOutput, GeneratedFileWithContent
+
+    if purpose not in _CODE_GEN_PURPOSES:
+        raise ValueError(f"Unsupported code generation purpose: {purpose}")
+
+    artifacts = build_project_artifacts(
+        idea=idea,
+        title=title,
+        resolved_stack=resolved_stack,
+        architecture_plan=architecture_plan,
+        source_warnings=source_warnings,
+        target_users=target_users,
+        required_features=required_features,
+        tech_stack_preference=tech_stack_preference,
+        project_requirements=project_requirements,
+        target_platform=target_platform,
+        is_hackathon_mode=is_hackathon_mode,
+    )
+    exact = _STAGE_EXACT_PATHS.get(purpose, frozenset())
+    selected = [
+        artifact
+        for artifact in artifacts
+        if artifact["name"] in exact
+        or (
+            purpose == "generate_backend"
+            and artifact["name"].startswith("cli/")
+        )
+        or (
+            purpose == "generate_frontend"
+            and (
+                artifact["name"].startswith("extension/")
+                or artifact["name"] in {"manifest.json", "background.js", "popup.html", "popup.js", "content.js"}
+            )
+        )
+    ]
+    if not selected and purpose == "generate_docs":
+        selected = [artifact for artifact in artifacts if artifact["name"] == "README.md"]
+    files = [
+        GeneratedFileWithContent(
+            name=str(artifact["name"]),
+            kind=str(artifact.get("kind") or "code"),
+            summary=str(artifact.get("summary") or "Generated from classified project plan."),
+            content=str(artifact.get("content") or ""),
+        )
+        for artifact in selected
+        if str(artifact.get("content") or "").strip()
+    ]
+    stage_key = purpose.replace("generate_", "")
+    trace_reason = fallback_reason or "Used classification-driven project generator output for this stage."
+    return GeneratedFileBatchOutput(
+        stage=stage_key,
+        files=files,
+        mode=mode,  # type: ignore[arg-type]
+        decision_trace=[
+            f"{purpose}: emitted {len(files)} file(s) from classified project generator.",
+            trace_reason,
+        ],
+    ).model_dump()
 
 
 def _generation_stages(
@@ -90,8 +242,10 @@ def _generation_stages(
         stages.append("backend")
     if include_frontend:
         stages.append("frontend")
-    stages.extend(["docs", "demo"])
-    return tuple(stages or _STANDARD_STAGES)
+    stages.append("docs")
+    if product_brief.get("is_hackathon_mode") or product_brief.get("demo_mode"):
+        stages.append("demo")
+    return tuple(stages or ("docs",))
 
 
 async def run_staged_generation(
@@ -124,9 +278,7 @@ async def run_staged_generation(
         )
         last_artifacts, last_mode, last_traces = artifacts, mode, traces
         traces.insert(0, f"generation_attempt={attempt_name} files={len(artifacts)} mode={mode}")
-        if artifacts and mode == "live":
-            return artifacts, mode, traces
-        if artifacts and attempt_name == "minimal":
+        if artifacts:
             return artifacts, mode, traces
     return last_artifacts, last_mode, last_traces
 

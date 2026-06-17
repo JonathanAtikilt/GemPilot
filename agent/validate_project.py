@@ -106,8 +106,14 @@ def _filter_legacy_checks(
         }:
             checks.append({**item, "passed": True, "detail": "Skipped — simplified architecture doc expected."})
             continue
-        if name == "api_and_database_planned" and not profile.database_required:
-            checks.append({**item, "passed": True, "detail": "Skipped — database not required for this profile."})
+        if name == "api_and_database_planned" and not profile.backend_required and not profile.database_required:
+            checks.append(
+                {
+                    **item,
+                    "passed": True,
+                    "detail": "Skipped — no backend or database required for this profile.",
+                }
+            )
             continue
         if name == "auth_data_flow_present" and not profile.auth_required:
             checks.append({**item, "passed": True, "detail": "Skipped — authentication not required for this profile."})
@@ -168,6 +174,8 @@ def _filter_legacy_checks(
         still_critical.add("ui_specific")
     if profile.backend_required and vp.get("check_backend_routes"):
         still_critical.update({"backend_routes_exist"})
+    if profile.backend_required or profile.database_required:
+        still_critical.add("api_and_database_planned")
     if profile.database_required and vp.get("check_database_models"):
         still_critical.update({"database_models_used", "seed_data_present"})
     if require_live_manifest:

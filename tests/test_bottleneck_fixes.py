@@ -174,6 +174,44 @@ def test_empty_api_routes_backend_only_has_health() -> None:
     assert route_defs == ["get"]
 
 
+def test_todo_in_idea_does_not_fail_placeholder_validation() -> None:
+    from agent.project_validation import _artifact_map, _files_not_placeholder
+
+    artifacts = build_project_artifacts(
+        idea="Build a todo app for students to track assignments",
+        title="Todo App",
+        resolved_stack="React, FastAPI",
+    )
+    assert _files_not_placeholder(_artifact_map(artifacts)) is True
+
+
+def test_placeholder_sanitizer_fixes_live_stage_mock_database_payload() -> None:
+    from agent.project_generation import ensure_placeholder_safe_artifacts
+    from agent.project_validation import _artifact_map, _files_not_placeholder
+
+    artifacts = [
+        {
+            "name": "backend/db.py",
+            "kind": "python",
+            "summary": "Database layer",
+            "content": (
+                "class Base:\n"
+                "    pass\n\n"
+                "# TODO: wire up persistence\n"
+            ),
+        }
+    ]
+    assert _files_not_placeholder(_artifact_map(artifacts)) is False
+
+    cleaned = ensure_placeholder_safe_artifacts(
+        artifacts,
+        idea="Build a todo app for students to track assignments",
+        title="Todo App",
+        resolved_stack="React, FastAPI",
+    )
+    assert _files_not_placeholder(_artifact_map(cleaned)) is True
+
+
 def test_hackathon_files_only_when_enabled() -> None:
     off = build_project_artifacts(
         idea="Build a referral coordinator",

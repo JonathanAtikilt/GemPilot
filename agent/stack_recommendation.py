@@ -51,11 +51,13 @@ def _mentions(text: str, *terms: str) -> bool:
 def recommend_stack_heuristic(
     *,
     idea: str,
-    project_requirements: dict[str, Any] | None,
-    build_context: dict[str, Any],
+    project_requirements: dict[str, Any] | None = None,
+    build_context: dict[str, Any] | None = None,
+    platform: str | None = None,
 ) -> dict[str, Any]:
     """Project-specific stack when live LLM output is unavailable (explicit degraded path)."""
     requirements = project_requirements or {}
+    build_context = build_context or {}
     intake = build_context.get("frontendIntake") or {}
     if not isinstance(intake, dict):
         intake = {}
@@ -65,8 +67,10 @@ def recommend_stack_heuristic(
         or intake.get("projectDepth")
         or "Advanced Project"
     )
+    # Allow explicit platform kwarg to override requirements/intake
     platform = str(
-        requirements.get("target_platform")
+        platform
+        or requirements.get("target_platform")
         or intake.get("targetPlatform")
         or "web app"
     ).lower()
@@ -81,32 +85,72 @@ def recommend_stack_heuristic(
     langgraph_required = "langgraph" in rules_text
     hackathon = _mentions(rules_text, "hackathon", "judging", "demo", "sponsor")
 
+    # Per-platform stack selection
     if platform in {"api", "backend api"}:
         frontend = "Minimal admin UI or API docs (OpenAPI) only"
+        backend = "FastAPI (Python 3.12)"
+        database = (
+            "Supabase Postgres"
+            if _mentions(rules_text, "supabase", "postgres")
+            else "PostgreSQL (managed) with migrations"
+        )
+        authentication = (
+            "Supabase Auth"
+            if "supabase" in database.lower()
+            else "Clerk or JWT session auth"
+        )
     elif platform in {"mobile app", "mobile"}:
         frontend = "React Native (Expo) with TypeScript"
+        backend = "FastAPI (Python 3.12)"
+        database = (
+            "Supabase Postgres"
+            if _mentions(rules_text, "supabase", "postgres")
+            else "PostgreSQL (managed) with migrations"
+        )
+        authentication = (
+            "Supabase Auth"
+            if "supabase" in database.lower()
+            else "Clerk or JWT session auth"
+        )
+    elif platform in ("cli", "cli tool", "terminal", "command line", "developer tool"):
+        frontend = "None (terminal UI via Rich / Click)"
+        backend = "Python 3.12 with Click + Rich"
+        database = "SQLite (optional, via sqlite3 or SQLModel)"
+        authentication = "None or API key via environment variable"
+    elif platform in ("browser extension", "extension", "chrome extension", "firefox extension"):
+        frontend = "Vanilla JavaScript (Manifest V3) — popup.html + content scripts"
+        backend = "None (extension runs in browser; optional backend API if needed)"
+        database = "chrome.storage.local / IndexedDB for local state"
+        authentication = "Chrome Identity API or OAuth2 popup flow"
+    elif platform in ("desktop app", "desktop"):
+        frontend = "Electron + React or Tauri + Vue/React"
+        backend = "Node.js (Electron main process) or Rust (Tauri)"
+        database = "SQLite via better-sqlite3 or libsqlite"
+        authentication = "Local keychain or OAuth2 PKCE flow"
+    elif platform in ("data pipeline", "etl", "data engineering", "pipeline"):
+        frontend = "None or a minimal Jupyter/Streamlit dashboard"
+        backend = "Python with Pandas, Polars, or Apache Spark"
+        database = "PostgreSQL or DuckDB for analytical workloads"
+        authentication = "Service account / environment credentials"
     else:
         frontend = "Next.js 14 with React and TypeScript"
+        database = (
+            "Supabase Postgres"
+            if _mentions(rules_text, "supabase", "postgres")
+            else "PostgreSQL (managed) with migrations"
+        )
+        authentication = (
+            "Supabase Auth"
+            if "supabase" in database.lower()
+            else "Clerk or JWT session auth"
+        )
+        if preference:
+            backend = preference if len(preference) < 80 else "FastAPI (Python 3.12)"
+        elif study and depth.lower().startswith("hackathon"):
+            backend = "FastAPI (Python 3.12) for AI pipelines and file parsing"
+        else:
+            backend = "FastAPI (Python 3.12) or Node.js Express when team prefers JS end-to-end"
 
-    if preference:
-        backend = preference if len(preference) < 80 else "FastAPI (Python 3.12)"
-    elif study and depth.lower().startswith("hackathon"):
-        backend = "FastAPI (Python 3.12) for AI pipelines and file parsing"
-    elif platform == "api":
-        backend = "FastAPI (Python 3.12)"
-    else:
-        backend = "FastAPI (Python 3.12) or Node.js Express when team prefers JS end-to-end"
-
-    database = (
-        "Supabase Postgres"
-        if _mentions(rules_text, "supabase", "postgres")
-        else "PostgreSQL (managed) with migrations"
-    )
-    authentication = (
-        "Supabase Auth"
-        if "supabase" in database.lower()
-        else "Clerk or JWT session auth"
-    )
     ai_models: list[str] = []
     if provider_required or study:
         ai_models.append("Google Gemini for planning and structured JSON generation")
@@ -146,9 +190,10 @@ def recommend_stack_heuristic(
         alignment.append("No sponsor-mandated stack in RAG; choices follow idea, depth, and platform.")
 
     rejected: list[str] = []
-    rejected.append(
-        f"Alternative (not default): {HOST_PLATFORM_STACK_LABEL}"
-    )
+    if platform not in ("cli", "browser extension", "extension", "desktop app"):
+        rejected.append(
+            f"Alternative (not default): {HOST_PLATFORM_STACK_LABEL}"
+        )
     if not provider_required:
         rejected.append("Skipped generic GemPilot host stack (Next.js orchestrator + internal LangGraph).")
 

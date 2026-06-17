@@ -1082,7 +1082,7 @@ def _code_generation_payload(
                     "engine = create_async_engine(DATABASE_URL, echo=False)\n"
                     "AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)\n\n"
                     "class Base(DeclarativeBase):\n"
-                    "    pass\n\n"
+                    "    ...\n\n"
                     "async def get_db():\n"
                     "    async with AsyncSessionLocal() as session:\n"
                     "        yield session\n"

@@ -100,7 +100,11 @@ from agent.orchestration_pipeline import (
 )
 from agent.project_generation import (
     artifact_groups,
+    ensure_api_database_plans,
+    ensure_frontend_reflects_project,
     ensure_imports_resolve,
+    ensure_placeholder_safe_artifacts,
+    generate_project_artifacts,
     hydrate_file_manifest,
     merge_scaffold_over_model,
 )
@@ -949,21 +953,12 @@ def build_workflow(
         if recommended_stack.get("testing"):
             stack["testing"] = recommended_stack["testing"]
 
-        raw_artifacts, overall_mode, gen_traces = await run_staged_generation(
-            model_client=active_model_client,
-            settings=settings,
-            idea=state["idea"],
-            product_brief=mvp_scope,
-            stack=stack,
-            architecture=repo_plan,
-        )
-
-        if not raw_artifacts:
-            raise RuntimeError(
-                "Staged generation produced no files after retry/simplify attempts."
-            )
-
         intake = state.get("frontend_intake") or build_context.get("frontendIntake", {})
+        product_brief = {
+            **mvp_scope,
+            "demo_mode": bool(state.get("demo_mode")),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
+        }
         generation_kwargs = {
             "idea": state["idea"],
             "title": project_title_from_context(idea=state["idea"], intake=intake),
@@ -978,12 +973,34 @@ def build_workflow(
                 repo_plan=repo_plan,
             ),
             "tech_stack_preference": tech_stack_from_context(intake, repo_plan),
-            "project_requirements": mvp_scope,
-            "target_platform": mvp_scope.get("target_platform")
+            "project_requirements": product_brief,
+            "target_platform": product_brief.get("target_platform")
             or intake.get("targetPlatform")
             or intake.get("target_platform"),
             "is_hackathon_mode": bool(state.get("demo_mode")),
         }
+
+        raw_artifacts, overall_mode, gen_traces = await run_staged_generation(
+            model_client=active_model_client,
+            settings=settings,
+            idea=state["idea"],
+            product_brief=product_brief,
+            stack=stack,
+            architecture=repo_plan,
+        )
+
+        if not raw_artifacts:
+            raw_artifacts = generate_project_artifacts(**generation_kwargs)
+            overall_mode = "degraded"
+            gen_traces.append(
+                "Staged LLM generation returned no files; used classification-driven project generator scaffold."
+            )
+
+        if not raw_artifacts:
+            raise RuntimeError(
+                "Staged generation produced no files after retry/simplify attempts."
+            )
+
         if overall_mode == "live":
             raw_artifacts = hydrate_file_manifest(raw_artifacts, **generation_kwargs)
             gen_traces.append(
@@ -997,10 +1014,19 @@ def build_workflow(
 
         before_names = {a["name"] for a in raw_artifacts}
         raw_artifacts = ensure_imports_resolve(raw_artifacts, **generation_kwargs)
+        raw_artifacts = ensure_frontend_reflects_project(raw_artifacts, **generation_kwargs)
+        raw_artifacts = ensure_api_database_plans(raw_artifacts, **generation_kwargs)
+        raw_artifacts = ensure_placeholder_safe_artifacts(raw_artifacts, **generation_kwargs)
         after_names = {a["name"] for a in raw_artifacts}
         repairs = sorted(after_names - before_names)
         log_repairs(repairs=repairs)
         gen_traces.append("Repaired imports against the generated architecture without template overwrite.")
+        gen_traces.append(
+            "Ensured frontend references the submitted idea and planned product flows when LLM UI was generic."
+        )
+        gen_traces.append(
+            "Ensured API and database planning docs align with classified backend/database requirements."
+        )
 
         groups = artifact_groups(raw_artifacts)
         artifacts = [
@@ -1101,6 +1127,44 @@ def build_workflow(
             tech_stack_preference=tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
             project_requirements=enriched_scope,
         )
+        artifacts = ensure_api_database_plans(
+            artifacts,
+            idea=state["idea"],
+            title=project_title_from_context(idea=state["idea"], intake=frontend_intake),
+            resolved_stack=_resolved_stack_summary(state.get("build_context") or {}),
+            architecture_plan=state.get("repo_plan") or {},
+            source_warnings=_source_warnings(state.get("build_context") or {}),
+            target_users=target_users_from_context(frontend_intake),
+            required_features=features_from_context(
+                idea=state["idea"],
+                intake=frontend_intake,
+                mvp_scope=enriched_scope,
+                repo_plan=state.get("repo_plan") or {},
+            ),
+            tech_stack_preference=tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
+            project_requirements=enriched_scope,
+            target_platform=enriched_scope.get("target_platform"),
+            is_hackathon_mode=bool(state.get("demo_mode")),
+        )
+        placeholder_kwargs = {
+            "idea": state["idea"],
+            "title": project_title_from_context(idea=state["idea"], intake=frontend_intake),
+            "resolved_stack": _resolved_stack_summary(state.get("build_context") or {}),
+            "architecture_plan": state.get("repo_plan") or {},
+            "source_warnings": _source_warnings(state.get("build_context") or {}),
+            "target_users": target_users_from_context(frontend_intake),
+            "required_features": features_from_context(
+                idea=state["idea"],
+                intake=frontend_intake,
+                mvp_scope=enriched_scope,
+                repo_plan=state.get("repo_plan") or {},
+            ),
+            "tech_stack_preference": tech_stack_from_context(frontend_intake, state.get("repo_plan") or {}),
+            "project_requirements": enriched_scope,
+            "target_platform": enriched_scope.get("target_platform"),
+            "is_hackathon_mode": bool(state.get("demo_mode")),
+        }
+        artifacts = ensure_placeholder_safe_artifacts(artifacts, **placeholder_kwargs)
         validation = validate_project(
             idea=state["idea"],
             intake=frontend_intake,

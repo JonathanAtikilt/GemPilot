@@ -238,6 +238,40 @@ class IdeaAwarePartialClient:
         if purpose == "blocker_analysis":
             return _blocker_analysis_payload(mode, reason, idea)
 
+        if purpose in {
+            "generate_database",
+            "generate_backend",
+            "generate_frontend",
+            "generate_docs",
+            "generate_demo_video",
+        }:
+            from agent.code_generator import project_generator_stage_batch
+
+            return project_generator_stage_batch(
+                purpose=purpose,
+                idea=idea,
+                title=title,
+                resolved_stack=resolved_stack,
+                architecture_plan=architecture_plan,
+                source_warnings=_warnings_from_context(build_context),
+                target_users=target_users,
+                required_features=features,
+                tech_stack_preference=tech_stack,
+                project_requirements=project_requirements,
+                target_platform=(
+                    str(project_requirements.get("target_platform") or "")
+                    or str(intake.get("targetPlatform") or "")
+                    or None
+                ),
+                is_hackathon_mode=bool(
+                    project_requirements.get("is_hackathon_mode")
+                    or project_requirements.get("demo_mode")
+                    or intake.get("demo_mode")
+                ),
+                mode=mode,
+                fallback_reason=reason,
+            )
+
         raise ValueError(f"Unsupported model purpose: {purpose}")
 
 

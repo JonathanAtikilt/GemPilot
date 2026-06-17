@@ -31,4 +31,4 @@ def test_build_project_artifacts_includes_sqlite_and_deploy_docs() -> None:
     assert "docs/WALKTHROUGH.md" in names
     app = next(item for item in artifacts if item["name"] == "src/App.jsx")
     assert "collectionRoute" in app["content"]
-    assert "collectionRoute" in app["content"] or "reviewQueue" in app["content"]
+    assert "collectionRoute" in app["content"] or "workflowQueue" in app["content"]

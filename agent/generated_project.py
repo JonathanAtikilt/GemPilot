@@ -313,6 +313,8 @@ def build_project_artifacts(
                     api_routes=api_routes,
                     tabs=tabs,
                     route=route,
+                    archetype=archetype,
+                    auth_required=bool(requirements.get("auth_required")),
                     is_study=is_study,
                 ),
             },
@@ -326,7 +328,7 @@ def build_project_artifacts(
                 "name": "src/state/projectState.js",
                 "kind": "javascript",
                 "summary": "Domain seed state used by the generated UI and tests.",
-                "content": _frontend_state(project_title, features, user_flows, is_study),
+                "content": _frontend_state(project_title, features, user_flows, archetype=archetype),
             },
             {
                 "name": "src/styles.css",
@@ -785,9 +787,9 @@ def _extension_content_js(project_title: str) -> str:
         "  }\n"
         "});\n\n"
         "function runExtension(features) {\n"
-        "  // TODO: implement extension logic for the active page\n"
-        "  console.log('Extension activated with features:', features);\n"
-        "  return `Processed ${document.querySelectorAll('*').length} elements.`;\n"
+        "  const activeFeatures = Array.isArray(features) ? features : [];\n"
+        "  console.log('Extension activated with features:', activeFeatures);\n"
+        "  return `Processed ${document.querySelectorAll('*').length} elements for ${activeFeatures[0] || 'the page'}`;\n"
         "}\n"
     )
 
@@ -915,6 +917,29 @@ def _main_jsx() -> str:
     )
 
 
+def _api_route_fn_names(api_routes: list[str], *, limit: int = 6) -> list[str]:
+    """Derive exported API client function names from planned routes."""
+    if not api_routes:
+        api_routes = ["GET /health"]
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw_route in api_routes:
+        method, path = _split_api_route(raw_route)
+        slug = path[len("/api/") :] if path.startswith("/api/") else path.lstrip("/")
+        segments = [segment for segment in re.split(r"[/_{}-]+", slug) if segment]
+        if not segments:
+            segments = ["health"]
+        camel = segments[0].lower() + "".join(segment.capitalize() for segment in segments[1:])
+        fn_name = method.lower() + camel[0].upper() + camel[1:]
+        if fn_name in seen:
+            continue
+        seen.add(fn_name)
+        names.append(fn_name)
+        if len(names) >= limit:
+            break
+    return names or ["getHealth"]
+
+
 def _react_app(
     *,
     project_title: str,
@@ -926,12 +951,50 @@ def _react_app(
     api_routes: list[str],
     tabs: list[str],
     route: str,
-    is_study: bool,
+    archetype: str,
+    auth_required: bool = False,
+    is_study: bool = False,
 ) -> str:
+    del is_study
+    api_names = _api_route_fn_names(api_routes)
+    import_line = f"import {{ {', '.join(api_names)} }} from './lib/api.js';\n"
+    primary_fn = next((name for name in api_names if name.startswith("post")), api_names[0])
+    refresh_fn = next(
+        (name for name in api_names if name.startswith("get") and name.lower() != "gethealth"),
+        api_names[0],
+    )
+    primary_feature = features[0] if features else project_title
+    sample_input = (
+        f"Example input for {primary_feature}: describe the user goal, constraints, and expected outcome."
+    )
+    action_labels = {
+        "marketplace": "Create listing",
+        "dashboard": "Refresh metrics",
+        "planner": "Save plan",
+        "workflow": "Execute workflow",
+        "content": "Publish content",
+        "ai_system": "Run analysis",
+    }
+    action_label = action_labels.get(archetype, f"Execute {primary_feature.lower()}")
+    refresh_label = "Reload data" if archetype != "dashboard" else "Refresh dashboard"
+    session_block = (
+        "        <div className=\"sessionCard\">\n"
+        "          <span>Signed in</span>\n"
+        "          <strong>{session.name}</strong>\n"
+        "          <button type=\"button\" onClick={() => setSession({ name: personas[1] || 'Operator', role: 'admin' })}>Switch role</button>\n"
+        "        </div>\n"
+        if auth_required
+        else (
+            "        <div className=\"sessionCard\">\n"
+            "          <span>Project mode</span>\n"
+            "          <strong>{personas[0]}</strong>\n"
+            "        </div>\n"
+        )
+    )
     return (
         "import { useMemo, useState } from 'react';\n"
-        "import { seedAssets, reviewQueue, dashboardMetrics } from './state/projectState.js';\n"
-        "import { createUpload, generateQuiz, getDashboard } from './lib/api.js';\n\n"
+        "import { projectAssets, workflowQueue, projectMetrics } from './state/projectState.js';\n"
+        f"{import_line}\n"
         f"const projectTitle = {json.dumps(project_title)};\n"
         f"const idea = {json.dumps(idea)};\n"
         f"const features = {json.dumps(features, indent=2)};\n"
@@ -941,67 +1004,71 @@ def _react_app(
         f"const apiRoutes = {json.dumps(api_routes, indent=2)};\n"
         f"const tabs = {json.dumps(tabs)};\n"
         f"const collectionRoute = {json.dumps(route)};\n"
-        f"const isStudyProject = {json.dumps(is_study)};\n\n"
+        f"const primaryFeature = {json.dumps(primary_feature)};\n"
+        f"const primaryAction = {json.dumps(primary_fn)};\n"
+        f"const refreshAction = {json.dumps(refresh_fn)};\n\n"
         "export default function App() {\n"
         "  const [activeTab, setActiveTab] = useState(tabs[0]);\n"
-        "  const [session, setSession] = useState({ name: 'Avery Student', role: 'owner' });\n"
-        "  const [noteText, setNoteText] = useState('Photosynthesis lecture: spaced repetition works best when reviews are scheduled right before forgetting.');\n"
-        "  const [generated, setGenerated] = useState(null);\n"
+        f"  const [session, setSession] = useState({{ name: personas[0], role: {'\"owner\"' if auth_required else '\"user\"'} }});\n"
+        f"  const [workflowInput, setWorkflowInput] = useState({json.dumps(sample_input)});\n"
+        "  const [workflowResult, setWorkflowResult] = useState(null);\n"
         "  const [status, setStatus] = useState('Ready');\n"
-        "  const metrics = useMemo(() => dashboardMetrics, []);\n\n"
-        "  async function handleGenerate() {\n"
-        "    setStatus('Generating');\n"
-        "    const upload = await createUpload({ title: 'Lecture notes', content: noteText, route: collectionRoute });\n"
-        "    const quiz = await generateQuiz({ source_id: upload.id, content: noteText });\n"
-        "    setGenerated({ upload, quiz });\n"
-        "    setStatus('Generated');\n"
+        "  const metrics = useMemo(() => projectMetrics, []);\n\n"
+        "  async function handlePrimaryAction() {\n"
+        "    setStatus(`Running ${primaryFeature}`);\n"
+        "    const payload = { title: primaryFeature, content: workflowInput, route: collectionRoute, idea };\n"
+        f"    const runner = {{ {primary_fn} }};\n"
+        "    const result = await runner[primaryAction](payload);\n"
+        "    setWorkflowResult({ action: primaryFeature, result });\n"
+        "    setStatus(`Completed ${primaryFeature}`);\n"
         "  }\n\n"
-        "  async function refreshDashboard() {\n"
-        "    setStatus('Refreshing dashboard');\n"
-        "    const dashboard = await getDashboard();\n"
-        "    setGenerated((current) => ({ ...(current || {}), dashboard }));\n"
-        "    setStatus('Dashboard refreshed');\n"
+        "  async function handleRefresh() {\n"
+        "    setStatus('Refreshing project data');\n"
+        f"    const loader = {{ {', '.join(api_names)} }};\n"
+        "    const result = await loader[refreshAction]();\n"
+        "    setWorkflowResult((current) => ({ ...(current || {}), refresh: result }));\n"
+        "    setStatus('Data refreshed');\n"
         "  }\n\n"
         "  return (\n"
         "    <main className=\"appShell\">\n"
         "      <header className=\"topbar\">\n"
         "        <div>\n"
-        "          <p className=\"eyebrow\">Full-Stack Generated Project</p>\n"
+        f"          <p className=\"eyebrow\">{json.dumps(project_title)} — generated product</p>\n"
         "          <h1>{projectTitle}</h1>\n"
         "          <p className=\"lede\">{idea}</p>\n"
         "        </div>\n"
-        "        <div className=\"sessionCard\">\n"
-        "          <span>Signed in</span>\n"
-        "          <strong>{session.name}</strong>\n"
-        "          <button type=\"button\" onClick={() => setSession({ name: 'Morgan Admin', role: 'admin' })}>Switch role</button>\n"
-        "        </div>\n"
+        f"{session_block}"
         "      </header>\n"
         "      <nav className=\"tabs\">{tabs.map((tab) => <button key={tab} type=\"button\" className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}</nav>\n"
-        "      {activeTab === tabs[0] && <section className=\"grid\"><ProjectBrief personas={personas} features={features} apiRoutes={apiRoutes} /><Metrics metrics={metrics} /></section>}\n"
-        "      {activeTab === tabs[1] && <section className=\"workspace\"><textarea value={noteText} onChange={(event) => setNoteText(event.target.value)} rows={8} /><div className=\"actions\"><button type=\"button\" onClick={handleGenerate}>{isStudyProject ? 'Generate study assets' : 'Generate workflow assets'}</button><button type=\"button\" onClick={refreshDashboard}>Refresh dashboard</button></div><p className=\"status\">{status}</p></section>}\n"
-        "      {activeTab === tabs[2] && <section className=\"grid\"><ReviewQueue generated={generated} /><Advanced features={advancedFeatures} /></section>}\n"
-        "      {activeTab === tabs[3] && <section className=\"dashboard\"><FlowList flows={userFlows} /><AssetTable /></section>}\n"
+        "      {activeTab === tabs[0] && <section className=\"grid\"><ProjectBrief personas={personas} features={features} apiRoutes={apiRoutes} idea={idea} /><Metrics metrics={metrics} /></section>}\n"
+        "      {activeTab === tabs[1] && <section className=\"workspace\"><h2>{primaryFeature}</h2><textarea value={workflowInput} onChange={(event) => setWorkflowInput(event.target.value)} rows={8} /><div className=\"actions\"><button type=\"button\" onClick={handlePrimaryAction}>"
+        + action_label
+        + "</button><button type=\"button\" onClick={handleRefresh}>"
+        + refresh_label
+        + "</button></div><p className=\"status\">{status}</p></section>}\n"
+        "      {activeTab === tabs[2] && <section className=\"grid\"><WorkflowResult result={workflowResult} queue={workflowQueue} /><Advanced features={advancedFeatures} /></section>}\n"
+        "      {activeTab === tabs[3] && <section className=\"dashboard\"><FlowList flows={userFlows} /><AssetTable assets={projectAssets} /></section>}\n"
         "    </main>\n"
         "  );\n"
         "}\n\n"
-        "function ProjectBrief({ personas, features, apiRoutes }) {\n"
-        "  return <article className=\"panel\"><h2>Product System</h2><p>Built for {personas.join(', ')}.</p><ul>{features.slice(0, 8).map((feature) => <li key={feature}>{feature}</li>)}</ul><h3>API routes</h3><ul>{apiRoutes.map((route) => <li key={route}>{route}</li>)}</ul></article>;\n"
+        "function ProjectBrief({ personas, features, apiRoutes, idea }) {\n"
+        "  return <article className=\"panel\"><h2>Product scope</h2><p>{idea}</p><p>Built for {personas.join(', ')}.</p><ul>{features.slice(0, 8).map((feature) => <li key={feature}>{feature}</li>)}</ul><h3>API routes</h3><ul>{apiRoutes.map((route) => <li key={route}>{route}</li>)}</ul></article>;\n"
         "}\n\n"
         "function Metrics({ metrics }) {\n"
-        "  return <article className=\"panel metrics\"><h2>Readiness Dashboard</h2>{metrics.map((metric) => <div key={metric.label} className=\"metric\"><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</article>;\n"
+        "  return <article className=\"panel metrics\"><h2>Project metrics</h2>{metrics.map((metric) => <div key={metric.label} className=\"metric\"><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</article>;\n"
         "}\n\n"
-        "function ReviewQueue({ generated }) {\n"
-        "  const quizItems = generated?.quiz?.questions || reviewQueue;\n"
-        "  return <article className=\"panel\"><h2>Generated Review</h2><ul>{quizItems.map((item) => <li key={item.id || item.question}>{item.question || item.prompt}<span>{item.answer || item.due}</span></li>)}</ul></article>;\n"
+        "function WorkflowResult({ result, queue }) {\n"
+        "  const items = result?.result ? [result.result] : queue;\n"
+        "  return <article className=\"panel\"><h2>Workflow output</h2><ul>{items.map((item, index) => <li key={item.id || item.route || index}>{JSON.stringify(item)}</li>)}</ul></article>;\n"
         "}\n\n"
         "function Advanced({ features }) {\n"
-        "  return <article className=\"panel\"><h2>Advanced System Features</h2><ul>{features.map((feature) => <li key={feature}>{feature}</li>)}</ul></article>;\n"
+        "  return <article className=\"panel\"><h2>Extended capabilities</h2><ul>{features.map((feature) => <li key={feature}>{feature}</li>)}</ul></article>;\n"
         "}\n\n"
         "function FlowList({ flows }) {\n"
-        "  return <article className=\"panel\"><h2>User Flow</h2>{flows.map((flow) => <div key={flow.step} className=\"flow\"><strong>{flow.screen}</strong><span>{flow.action}</span><code>{flow.api || 'UI'}</code></div>)}</article>;\n"
+        "  return <article className=\"panel\"><h2>User flows</h2>{flows.map((flow) => <div key={flow.step} className=\"flow\"><strong>{flow.screen}</strong><span>{flow.action}</span><code>{flow.api || 'UI'}</code></div>)}</article>;\n"
         "}\n\n"
-        "function AssetTable() {\n"
-        "  return <article className=\"panel\"><h2>Generated Assets</h2>{seedAssets.map((asset) => <div key={asset.id} className=\"asset\"><span>{asset.type}</span><strong>{asset.title}</strong><em>{asset.status}</em></div>)}</article>;\n"
+        "function AssetTable({ assets }) {\n"
+        "  return <article className=\"panel\"><h2>Project records</h2>{assets.map((asset) => <div key={asset.id} className=\"asset\"><span>{asset.type}</span><strong>{asset.title}</strong><em>{asset.status}</em></div>)}</article>;\n"
         "}\n"
     )
 
@@ -1065,27 +1132,42 @@ def _api_client(api_routes: list[str]) -> str:
 {fn_block}"""
 
 
-def _frontend_state(project_title: str, features: list[str], user_flows: list[dict[str, Any]], is_study: bool) -> str:
+def _frontend_state(
+    project_title: str,
+    features: list[str],
+    user_flows: list[dict[str, Any]],
+    *,
+    archetype: str = "workflow",
+) -> str:
     assets = [
-        {"id": "asset-1", "type": "summary", "title": features[0] if features else project_title, "status": "ready"},
-        {"id": "asset-2", "type": "quiz", "title": "Adaptive quiz set" if is_study else "Validation checklist", "status": "draft"},
-        {"id": "asset-3", "type": "plan" if is_study else "dashboard", "title": "Personalized study planner" if is_study else "Personalized dashboard", "status": "live"},
-        {"id": "asset-4", "type": "progress" if is_study else "activity", "title": "Progress tracking" if is_study else "Activity tracking", "status": "live"},
-    ]
-    review = [
-        {"id": "q1", "question": "What concept needs review next?", "answer": "Spaced repetition queue" if is_study else "Highest-risk workflow"},
-        {"id": "q2", "question": "What is the next recommended action?", "answer": "Review weak topics" if is_study else "Complete validation"},
-    ]
+        {
+            "id": f"asset-{index + 1}",
+            "type": archetype,
+            "title": feature,
+            "status": "ready" if index == 0 else "draft",
+        }
+        for index, feature in enumerate(features[:4])
+    ] or [{"id": "asset-1", "type": archetype, "title": project_title, "status": "ready"}]
+    queue = [
+        {
+            "id": f"flow-{index + 1}",
+            "label": str(flow.get("screen") or f"Step {index + 1}"),
+            "detail": str(flow.get("action") or "Complete workflow step"),
+            "api": str(flow.get("api") or "UI"),
+        }
+        for index, flow in enumerate(user_flows[:4])
+        if isinstance(flow, dict)
+    ] or [{"id": "flow-1", "label": "Start", "detail": project_title, "api": "UI"}]
     metrics = [
-        {"label": "Features", "value": str(len(features)), "detail": "Generated feature modules"},
+        {"label": "Features", "value": str(len(features)), "detail": "Planned product capabilities"},
         {"label": "Flows", "value": str(max(1, len(user_flows))), "detail": "End-to-end user journeys"},
-        {"label": "Tests", "value": "API", "detail": "Backend smoke coverage included"},
-        {"label": "Progress", "value": "86%" if is_study else "Ready", "detail": "Demo seed data available"},
+        {"label": "Routes", "value": str(len(user_flows)), "detail": "Workflow screens mapped to APIs"},
+        {"label": "Status", "value": "Ready", "detail": "Generated project runtime"},
     ]
     return (
-        f"export const seedAssets = {json.dumps(assets, indent=2)};\n\n"
-        f"export const reviewQueue = {json.dumps(review, indent=2)};\n\n"
-        f"export const dashboardMetrics = {json.dumps(metrics, indent=2)};\n"
+        f"export const projectAssets = {json.dumps(assets, indent=2)};\n\n"
+        f"export const workflowQueue = {json.dumps(queue, indent=2)};\n\n"
+        f"export const projectMetrics = {json.dumps(metrics, indent=2)};\n"
     )
 
 

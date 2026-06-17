@@ -13,7 +13,21 @@ def test_generation_stages_for_cli_skips_database_and_frontend() -> None:
     assert "database" not in stages
     assert "frontend" not in stages
     assert "backend" in stages
-    assert stages[-2:] == ("docs", "demo")
+    assert stages[-1] == "docs"
+    assert "demo" not in stages
+
+    hackathon_stages = _generation_stages(
+        {
+            "implementation_stages": ["cli_core", "commands", "tests", "docs", "demo"],
+        },
+        {
+            "database_required": False,
+            "backend_required": True,
+            "frontend_required": False,
+            "demo_mode": True,
+        },
+    )
+    assert hackathon_stages[-2:] == ("docs", "demo")
 
 
 def test_generation_stages_for_web_app_keeps_full_stack() -> None:
@@ -28,4 +42,4 @@ def test_generation_stages_for_web_app_keeps_full_stack() -> None:
         },
         {"database_required": True, "backend_required": True, "frontend_required": True},
     )
-    assert stages == ("database", "backend", "frontend", "docs", "demo")
+    assert stages == ("database", "backend", "frontend", "docs")
